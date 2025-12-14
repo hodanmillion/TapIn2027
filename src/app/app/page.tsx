@@ -170,8 +170,7 @@ export default function AppPage() {
   const networkStatus = useNetworkStatus()
   const { messages, sendMessage: sendMessageViaHook, retryMessage } = useMessages(
     selectedChat?.id || null,
-    user?.id || null,
-    location ? { lat: location.lat, lng: location.lng } : undefined
+    user?.id || null
   )
 
   const router = useRouter()

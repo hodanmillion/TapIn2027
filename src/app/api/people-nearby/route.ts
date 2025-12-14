@@ -12,7 +12,12 @@ const supabase = createClient(
   }
 )
 
-const cache = new Map<string, { data: any; timestamp: number }>()
+interface CachedData {
+  data: unknown;
+  timestamp: number;
+}
+
+const cache = new Map<string, CachedData>()
 const CACHE_TTL = 30000
 
 export async function GET(request: NextRequest) {

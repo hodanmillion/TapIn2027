@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from "react-leaflet"
+import Image from "next/image"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
 import "leaflet.heat"
@@ -570,11 +571,14 @@ export function HeatMap({ people, center, currentUserLocation, onPersonClick, ar
           >
             <Popup>
               <div className="text-center p-2 min-w-[180px]">
-                <img 
-                  src={photo.photo_url} 
-                  alt={photo.caption || "Location photo"} 
-                  className="w-full h-32 object-cover rounded-lg mb-2"
-                />
+                <div className="relative w-full h-32 mb-2">
+                  <Image 
+                    src={photo.photo_url} 
+                    alt={photo.caption || "Location photo"} 
+                    fill
+                    className="object-cover rounded-lg"
+                  />
+                </div>
                 {photo.caption && (
                   <p className="text-sm mb-2">{photo.caption}</p>
                 )}

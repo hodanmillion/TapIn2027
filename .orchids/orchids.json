@@ -6,5 +6,5 @@
     "npm install; npm run dev"
   ],
   "vercelProjectId": "prj_Efdxq1bMKQ2ddf404t4gTYUIlVpj",
-  "deployedWithUserToken": false
+  "deployedWithUserToken": true
 }

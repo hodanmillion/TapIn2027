@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid"
-import { db, OutboxMessage, CachedMessage, getSyncTimestamp, setSyncTimestamp } from "./db"
+import { db, OutboxMessage, CachedMessage } from "./db"
 
 const MAX_RETRY_COUNT = 5
 const BASE_BACKOFF_MS = 1000

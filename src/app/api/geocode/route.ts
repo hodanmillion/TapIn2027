@@ -7,7 +7,6 @@ export async function GET(req: Request) {
     const lng = searchParams.get("lng")
     const address = searchParams.get("address")
 
-    // Forward geocoding: address to coordinates
     if (address) {
       try {
         const controller = new AbortController()
@@ -38,9 +37,9 @@ export async function GET(req: Request) {
             })
           }
         }
-      } catch (err: any) {
-        if (err.name !== 'AbortError') {
-          console.error("Forward geocoding failed:", err.message || err)
+      } catch (err) {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          console.error("Forward geocoding failed:", err.message)
         }
       }
 
@@ -50,16 +49,12 @@ export async function GET(req: Request) {
       )
     }
 
-    // Reverse geocoding: coordinates to address
     if (!lat || !lng) {
       return NextResponse.json(
         { name: "Unknown Location", city: "Unknown Location" },
         { status: 200 }
       )
     }
-
-    const latitude = parseFloat(lat)
-    const longitude = parseFloat(lng)
 
     try {
       const controller = new AbortController()
@@ -114,9 +109,9 @@ export async function GET(req: Request) {
           return NextResponse.json({ name, city })
         }
       }
-    } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        console.error("Geocoding API failed:", err.message || err)
+    } catch (err) {
+      if (err instanceof Error && err.name !== 'AbortError') {
+        console.error("Geocoding API failed:", err.message)
       }
     }
 
@@ -124,7 +119,7 @@ export async function GET(req: Request) {
       { name: null, city: "Unknown City" },
       { status: 200 }
     )
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { name: null, city: "Unknown City" },
       { status: 200 }

@@ -7,7 +7,7 @@ import { useNetworkStatus } from "./useNetworkStatus"
 import { createClient } from "@/lib/supabase/client"
 import type { LocationMessageWithUser } from "@/lib/types"
 
-export function useMessages(threadId: string | null, userId: string | null, userLocation?: { lat: number; lng: number }) {
+export function useMessages(threadId: string | null, userId: string | null) {
   const [messages, setMessages] = useState<(CachedMessage & { user?: any })[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -73,8 +73,6 @@ export function useMessages(threadId: string | null, userId: string | null, user
         .equals(threadId)
         .and((msg) => msg.status === "pending" || msg.status === "failed")
         .toArray()
-
-      const pendingClientIds = new Set(existingPending.map((m) => m.client_id))
 
       await db.messages
         .where("thread_id")

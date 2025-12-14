@@ -1,7 +1,12 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 
-const cache = new Map<string, { data: any; timestamp: number }>()
+interface CachedData {
+  data: unknown;
+  timestamp: number;
+}
+
+const cache = new Map<string, CachedData>()
 const CACHE_TTL = 60000
 
 export async function GET(request: NextRequest) {
@@ -127,7 +132,7 @@ export async function POST(request: NextRequest) {
     const fileExt = file.name.split(".").pop()
     const fileName = `${user.id}/${Date.now()}.${fileExt}`
 
-    const { data: uploadData, error: uploadError } = await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from("location-photos")
       .upload(fileName, file, {
         contentType: file.type,

@@ -205,35 +205,34 @@ export async function POST(request: Request) {
     ]
 
     if (senderData?.city && chatData && content.length <= 50) {
-      updatePromises.push(
-        supabaseAdmin
-          .from("profiles")
-          .select("id")
-          .eq("city", senderData.city)
-          .neq("id", user_id)
-          .limit(50)
-          .then(({ data: nearbyUsers }) => {
-            if (nearbyUsers && nearbyUsers.length > 0) {
-              const notifications = nearbyUsers.map(u => ({
-                user_id: u.id,
-                chat_type: "location",
-                chat_id: chat_id,
-                chat_name: chatData.location_name,
-                message_preview: content.length > 50 ? content.substring(0, 50) + "..." : content,
-                sender_name: senderData.display_name || senderData.username || "Anonymous",
-                sender_avatar: senderData.avatar_url,
-              }))
-              return supabaseAdmin.from("chat_notifications").insert(notifications)
-            }
-          })
-      )
+      supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .eq("city", senderData.city)
+        .neq("id", user_id)
+        .limit(50)
+        .then(({ data: nearbyUsers }) => {
+          if (nearbyUsers && nearbyUsers.length > 0) {
+            const notifications = nearbyUsers.map(u => ({
+              user_id: u.id,
+              chat_type: "location",
+              chat_id: chat_id,
+              chat_name: chatData.location_name,
+              message_preview: content.length > 50 ? content.substring(0, 50) + "..." : content,
+              sender_name: senderData.display_name || senderData.username || "Anonymous",
+              sender_avatar: senderData.avatar_url,
+            }))
+            return supabaseAdmin.from("chat_notifications").insert(notifications)
+          }
+        })
+        .catch(() => {})
     }
 
     await Promise.allSettled(updatePromises)
 
     return NextResponse.json({ message: data })
-  } catch (error: any) {
-    console.error('[LocationChatMessages] Unexpected error:', error)
+  } catch {
+    console.error('[LocationChatMessages] Unexpected error')
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
@@ -269,7 +268,7 @@ export async function PATCH(request: Request) {
     }
 
     return NextResponse.json({ message: data })
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
@@ -304,7 +303,7 @@ export async function DELETE(request: Request) {
     }
 
     return NextResponse.json({ success: true })
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
