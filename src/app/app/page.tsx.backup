@@ -1,0 +1,1855 @@
+"use client"
+
+import { useEffect, useState, useCallback, useRef, Suspense, useMemo } from "react"
+import { Capacitor } from "@capacitor/core"
+import { Geolocation } from "@capacitor/geolocation"
+import { createClient } from "@/lib/supabase/client"
+import { useRouter } from "next/navigation"
+import Link from "next/link"
+import dynamic from "next/dynamic"
+import { LocationChat, LocationMessageWithUser } from "@/lib/types"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { useMessages } from "@/hooks/useMessages"
+import { useNetworkStatus } from "@/hooks/useNetworkStatus"
+import { OfflineBanner } from "@/components/OfflineBanner"
+import { startOutboxProcessor } from "@/lib/sync"
+import {
+  MapPin,
+  Send,
+  ArrowLeft,
+  MessageCircle,
+  Users,
+  Clock,
+  Loader2,
+  Radio,
+  Smile,
+  Image,
+  X,
+  Settings,
+  LogOut,
+  Info,
+  Navigation,
+  Map as MapIcon,
+  AlertCircle,
+  CheckCheck,
+} from "lucide-react"
+import type { EmojiClickData } from "emoji-picker-react"
+import type { TenorImage } from "gif-picker-react"
+
+const HeatMap = dynamic(() => import("@/components/HeatMap").then((m) => m.HeatMap), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex items-center justify-center bg-secondary/20">
+      <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+    </div>
+  ),
+})
+
+const EmojiPicker = dynamic(() => import("emoji-picker-react"), {
+  ssr: false,
+  loading: () => null,
+})
+
+const GifPicker = dynamic(() => import("gif-picker-react"), {
+  ssr: false,
+  loading: () => null,
+})
+
+type NearbyPerson = {
+  id: string
+  username: string
+  display_name: string | null
+  avatar_url: string | null
+  latitude: number
+  longitude: number
+  is_online: boolean
+}
+
+type PermissionStatus = "prompt" | "granted" | "denied" | "checking"
+
+type ChatVisit = {
+  id: string
+  chat_id: string
+  location_name: string | null
+  visited_at: string
+  is_current: boolean
+  chat?: LocationChat | null
+}
+
+const PROXIMITY_RADIUS_METERS = 50
+const MIN_MOVEMENT_METERS = 50
+const DEBOUNCE_DELAY = 300
+const LOCATION_UPDATE_INTERVAL = 10000
+
+function debounce<T extends (...args: any[]) => any>(func: T, wait: number): (...args: Parameters<T>) => void {
+  let timeout: NodeJS.Timeout | null = null
+  return function executedFunction(...args: Parameters<T>) {
+    const later = () => {
+      timeout = null
+      func(...args)
+    }
+    if (timeout) clearTimeout(timeout)
+    timeout = setTimeout(later, wait)
+  }
+}
+
+function getDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const R = 6371000
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) * Math.sin(dLng / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
+}
+
+export default function AppPage() {
+  const [user, setUser] = useState<{ id: string } | null>(null)
+  const [location, setLocation] = useState<{ lat: number; lng: number; name: string; city: string } | null>(null)
+  const [nearbyPeople, setNearbyPeople] = useState<NearbyPerson[]>([])
+  const [selectedChat, setSelectedChat] = useState<LocationChat | null>(null)
+  const [newMessage, setNewMessage] = useState("")
+  const [loadingLocation, setLoadingLocation] = useState(true)
+  const [proximityChat, setProximityChat] = useState<LocationChat | null>(null)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [showGifPicker, setShowGifPicker] = useState(false)
+  const [locationPermission, setLocationPermission] = useState<PermissionStatus>("checking")
+  const [locationError, setLocationError] = useState("")
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [recentHistory, setRecentHistory] = useState<ChatVisit[]>([])
+  const [activeTab, setActiveTab] = useState<"map" | "chat" | "photos">("map")
+  const [locationPhotos, setLocationPhotos] = useState<any[]>([])
+  const [lastKnownAddress, setLastKnownAddress] = useState<string>("Locating...")
+  const [networkError, setNetworkError] = useState<string>("")
+  const [sending, setSending] = useState(false)
+  const [imageError, setImageError] = useState<string>("")
+  const [showPhotoModal, setShowPhotoModal] = useState(false)
+  const [photoCaption, setPhotoCaption] = useState("")
+  const [uploadingLocationPhoto, setUploadingLocationPhoto] = useState(false)
+
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const isNearBottomRef = useRef(true)
+  const lastChatIdRef = useRef<string | null>(null)
+  const prevMessagesLengthRef = useRef(0)
+  const fetchAbortControllersRef = useRef(new Map<string, AbortController>())
+  const fetchNearbyInProgressRef = useRef(false)
+  const updateLocationInProgressRef = useRef(false)
+  const lastLocationUpdateRef = useRef(0)
+  const autoJoinInProgressRef = useRef(false)
+  const geocodeInProgressRef = useRef(false)
+  const lastGeocodedRef = useRef<{ lat: number; lng: number } | null>(null)
+  const lastKnownLocationRef = useRef<{ lat: number; lng: number } | null>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const locationPhotoInputRef = useRef<HTMLInputElement>(null)
+  
+  const networkStatus = useNetworkStatus()
+  const { messages, sendMessage: sendMessageViaHook, retryMessage } = useMessages(
+    selectedChat?.id || null,
+    user?.id || null,
+    location ? { lat: location.lat, lng: location.lng } : undefined
+  )
+
+  const router = useRouter()
+  const supabase = useRef(createClient()).current
+  const platform = Capacitor.getPlatform()
+  const isNative = platform !== "web"
+
+  const cacheLocation = (value: { lat: number; lng: number; name: string; city: string }) => {
+    if (typeof window === "undefined") return
+    localStorage.setItem("tapin:lastLocation", JSON.stringify(value))
+  }
+
+  const cacheSet = (key: string, value: unknown, ttlMinutes = 5) => {
+    if (typeof window === "undefined") return
+    const item = { value, expiry: Date.now() + ttlMinutes * 60000 }
+    localStorage.setItem(key, JSON.stringify(item))
+  }
+
+  const cacheGet = <T,>(key: string): T | null => {
+    if (typeof window === "undefined") return null
+    try {
+      const item = localStorage.getItem(key)
+      console.log(`[Cache] Getting ${key}:`, item ? 'found' : 'not found')
+      if (!item) return null
+      const parsed = JSON.parse(item)
+      if (Date.now() > parsed.expiry) {
+        console.log(`[Cache] ${key} expired, removing`)
+        localStorage.removeItem(key)
+        return null
+      }
+      return parsed.value as T
+    } catch (err) {
+      console.error(`[Cache] Error getting ${key}:`, err)
+      return null
+    }
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const cached = localStorage.getItem("tapin:lastLocation")
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached)
+        console.log('[Init-SSR] Loaded cached location:', parsed)
+        setLocation(parsed)
+        if (parsed.name) {
+          setLastKnownAddress(parsed.name)
+        }
+        setLocationPermission("granted")
+        setLoadingLocation(false)
+      } catch (err) {
+        console.error('[Init-SSR] Failed to parse cached location:', err)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      fetchAbortControllersRef.current.forEach((controller) => {
+        controller.abort()
+      })
+      fetchAbortControllersRef.current.clear()
+    }
+  }, [])
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }
+
+  const checkIfNearBottom = () => {
+    if (!messagesContainerRef.current) return true
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+    return distanceFromBottom < 100
+  }
+
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    const handleScroll = () => {
+      isNearBottomRef.current = checkIfNearBottom()
+    }
+
+    container.addEventListener('scroll', handleScroll)
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [selectedChat])
+
+  useEffect(() => {
+    if (selectedChat) {
+      const isNewChat = lastChatIdRef.current !== selectedChat.id
+      lastChatIdRef.current = selectedChat.id
+      
+      if (isNewChat) {
+        isNearBottomRef.current = true
+        setTimeout(() => scrollToBottom(), 100)
+      }
+    } else {
+      lastChatIdRef.current = null
+    }
+  }, [selectedChat])
+
+  useEffect(() => {
+    const isNewChat = selectedChat && lastChatIdRef.current === selectedChat.id && prevMessagesLengthRef.current === 0 && messages.length > 0
+    
+    if (isNewChat) {
+      setTimeout(() => scrollToBottom(), 100)
+    } else if (messages.length > prevMessagesLengthRef.current && isNearBottomRef.current) {
+      scrollToBottom()
+    }
+    
+    prevMessagesLengthRef.current = messages.length
+  }, [messages, selectedChat])
+
+  const fetchNearbyPeople = useCallback(async (city: string, userId: string) => {
+    if (fetchNearbyInProgressRef.current) {
+      return
+    }
+
+    fetchNearbyInProgressRef.current = true
+
+    const cacheKey = `tapin:nearby:${city}:${userId}`
+    const cached = cacheGet<NearbyPerson[]>(cacheKey)
+    if (cached) {
+      setNearbyPeople(cached)
+    }
+
+    const fetchKey = 'nearby-people'
+    const existingController = fetchAbortControllersRef.current.get(fetchKey)
+    if (existingController) {
+      existingController.abort()
+    }
+
+    const controller = new AbortController()
+    fetchAbortControllersRef.current.set(fetchKey, controller)
+
+    try {
+      const res = await fetch(`/api/people-nearby?scope=world&limit=200&userId=${userId}${city ? `&city=${encodeURIComponent(city)}` : ""}`, {
+        signal: controller.signal,
+      })
+      
+      if (!res.ok) throw new Error('Failed to fetch')
+      
+      const data = await res.json()
+      if (data.people) {
+        setNearbyPeople(data.people)
+        cacheSet(cacheKey, data.people, 2)
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError' && !cached) {
+        setNetworkError("Could not refresh nearby people. Check connection.")
+      }
+    } finally {
+      fetchNearbyInProgressRef.current = false
+      fetchAbortControllersRef.current.delete(fetchKey)
+    }
+  }, [])
+
+  const updateUserLocation = useCallback(async (userId: string, lat: number, lng: number, city: string) => {
+    const now = Date.now()
+    if (now - lastLocationUpdateRef.current < LOCATION_UPDATE_INTERVAL) {
+      return
+    }
+
+    if (updateLocationInProgressRef.current) {
+      return
+    }
+
+    updateLocationInProgressRef.current = true
+    lastLocationUpdateRef.current = now
+
+    const fetchKey = 'update-location'
+    const existingController = fetchAbortControllersRef.current.get(fetchKey)
+    if (existingController) {
+      existingController.abort()
+    }
+
+    const controller = new AbortController()
+    fetchAbortControllersRef.current.set(fetchKey, controller)
+
+    try {
+      await fetch("/api/people-nearby", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, latitude: lat, longitude: lng, city }),
+        signal: controller.signal,
+      })
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        setNetworkError("Location update failed. Reconnecting...")
+      }
+    } finally {
+      updateLocationInProgressRef.current = false
+      fetchAbortControllersRef.current.delete(fetchKey)
+    }
+  }, [])
+
+  const fetchHistory = useCallback(async (userId: string) => {
+    const cacheKey = `tapin:history:${userId}`
+    const cached = cacheGet<ChatVisit[]>(cacheKey)
+    if (cached) {
+      setRecentHistory(cached.filter((item) => item.chat))
+      return
+    }
+
+    const fetchKey = 'history'
+    const existingController = fetchAbortControllersRef.current.get(fetchKey)
+    if (existingController) {
+      existingController.abort()
+    }
+
+    const controller = new AbortController()
+    fetchAbortControllersRef.current.set(fetchKey, controller)
+
+    try {
+      const res = await fetch(`/api/chat-history?userId=${userId}`, {
+        signal: controller.signal,
+      })
+      const data = await res.json()
+      if (data.history) {
+        const filtered = (data.history as ChatVisit[]).filter((item) => item.chat)
+        setRecentHistory(filtered)
+        cacheSet(cacheKey, filtered, 3)
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError' && !cached) {
+        setNetworkError("History unavailable right now. Try again soon.")
+      }
+    } finally {
+      fetchAbortControllersRef.current.delete(fetchKey)
+    }
+  }, [])
+
+  const fetchLocationPhotos = useCallback(async (chatId?: string, lat?: number, lng?: number) => {
+    const fetchKey = `photos-${chatId || `${lat}-${lng}`}`
+    const existingController = fetchAbortControllersRef.current.get(fetchKey)
+    if (existingController) {
+      existingController.abort()
+    }
+
+    const controller = new AbortController()
+    fetchAbortControllersRef.current.set(fetchKey, controller)
+
+    try {
+      let url = "/api/location-photos?"
+      if (chatId) {
+        url += `chatId=${chatId}`
+      } else if (lat && lng) {
+        url += `latitude=${lat}&longitude=${lng}&radius=50`
+      } else {
+        return
+      }
+
+      const res = await fetch(url, { signal: controller.signal })
+      if (!res.ok) throw new Error('Failed to fetch photos')
+      
+      const data = await res.json()
+      if (data.photos) {
+        setLocationPhotos(data.photos)
+      }
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        console.error("Failed to fetch photos:", error)
+      }
+    } finally {
+      fetchAbortControllersRef.current.delete(fetchKey)
+    }
+  }, [])
+
+  const autoJoinProximityChat = useCallback(async (lat: number, lng: number, locationName: string, userId?: string) => {
+     if (autoJoinInProgressRef.current) return
+     
+     autoJoinInProgressRef.current = true
+     
+     try {
+       const roundedLat = Math.round(lat * 1000) / 1000
+       const roundedLng = Math.round(lng * 1000) / 1000
+       
+       const finalLocationName = locationName && locationName !== "Unknown" && locationName !== "Locating..."
+         ? locationName 
+         : `Location ${Math.abs(roundedLat)},${Math.abs(roundedLng)}`
+       
+       const controller = new AbortController()
+       const timeoutId = setTimeout(() => controller.abort(), 8000)
+       
+       const res = await fetch("/api/location-chat", {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+         body: JSON.stringify({
+           auto_join: true,
+           latitude: roundedLat,
+           longitude: roundedLng,
+           location_name: finalLocationName,
+         }),
+         signal: controller.signal,
+       })
+       
+       clearTimeout(timeoutId)
+       
+       if (!res.ok) return
+       
+       const data = await res.json()
+       if (data.chat) {
+         setProximityChat(data.chat)
+         if (userId) {
+           fetch("/api/chat-history", {
+             method: "POST",
+             headers: { "Content-Type": "application/json" },
+             body: JSON.stringify({
+               user_id: userId,
+               chat_id: data.chat.id,
+               location_name: data.chat.location_name,
+               action: "join",
+             }),
+           }).catch(() => {})
+           fetchHistory(userId).catch(() => {})
+         }
+       }
+     } catch (err: any) {
+       if (err.name !== 'AbortError') {
+         console.error('[AutoJoin] Error:', err.message)
+       }
+     } finally {
+       autoJoinInProgressRef.current = false
+     }
+   }, [fetchHistory])
+
+  const fetchMessages = useCallback(async (chatId: string, userId?: string) => {
+     if (!userId) {
+       console.warn('[FetchMessages] No userId provided')
+       return
+     }
+     const cacheKey = `tapin:messages:${chatId}`
+     const cached = cacheGet<LocationMessageWithUser[]>(cacheKey)
+     if (cached && cached.length > 0) {
+       setMessages(cached)
+     }
+
+     const fetchKey = `messages-${chatId}`
+     const existingController = fetchAbortControllersRef.current.get(fetchKey)
+     if (existingController) {
+       existingController.abort()
+     }
+
+     const controller = new AbortController()
+     fetchAbortControllersRef.current.set(fetchKey, controller)
+
+     try {
+       const res = await fetch(`/api/location-chat/messages?chatId=${chatId}&userId=${userId}`, {
+         signal: controller.signal,
+       })
+       
+       if (!res.ok) {
+         const errorData = await res.json().catch(() => ({ error: 'Unknown error' }))
+         console.error('[FetchMessages] API error:', res.status, errorData)
+         if (res.status === 403 && !cached) {
+           setNetworkError("You're outside the chat area")
+         }
+         return
+       }
+       
+       const data = await res.json()
+       if (data.messages) {
+         setMessages(data.messages)
+         cacheSet(cacheKey, data.messages, 1)
+       }
+     } catch (err: any) {
+       if (err.name !== 'AbortError') {
+         console.error('[FetchMessages] Fetch error:', err)
+         if (!cached) {
+           setNetworkError("Live messages paused. Check connection.")
+         }
+       }
+     } finally {
+       fetchAbortControllersRef.current.delete(fetchKey)
+     }
+   }, [cacheGet, cacheSet])
+
+  const reverseGeocode = async (lat: number, lng: number): Promise<{ name: string; city: string }> => {
+    if (geocodeInProgressRef.current) {
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
+
+    geocodeInProgressRef.current = true
+    lastGeocodedRef.current = { lat, lng }
+    
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 3000)
+      
+      const res = await fetch(`/api/geocode?lat=${lat}&lng=${lng}`, {
+        signal: controller.signal
+      })
+      
+      clearTimeout(timeoutId)
+      
+      if (res.ok) {
+        const data = await res.json()
+        if (data.name && data.city) {
+          setLastKnownAddress(data.name)
+          return { name: data.name, city: data.city }
+        }
+        
+        if (data.city && lastKnownAddress) {
+          return { name: lastKnownAddress, city: data.city }
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name !== 'AbortError') {
+        console.error("Geocoding error:", err)
+      }
+    } finally {
+      geocodeInProgressRef.current = false
+    }
+    
+    const fallbackCity = getFallbackCityName(lat, lng)
+    
+    if (lastKnownAddress && lastKnownAddress !== "Locating...") {
+      return { name: lastKnownAddress, city: fallbackCity }
+    }
+    
+    const roundedName = `Location ${Math.abs(lat.toFixed(2))},${Math.abs(lng.toFixed(2))}`
+    setLastKnownAddress(roundedName)
+    
+    return { 
+      name: roundedName, 
+      city: fallbackCity 
+    }
+  }
+
+  function getFallbackCityName(lat: number, lng: number): string {
+    if (lat >= 40.5 && lat <= 41 && lng >= -74.5 && lng <= -73.5) return "New York"
+    if (lat >= 34 && lat <= 34.5 && lng >= -118.5 && lng <= -118) return "Los Angeles"
+    if (lat >= 41.5 && lat <= 42.5 && lng >= -88 && lng <= -87) return "Chicago"
+    if (lat >= 29.5 && lat <= 30 && lng >= -95.5 && lng <= -95) return "Houston"
+    if (lat >= 33 && lat <= 33.5 && lng >= -112.5 && lng <= -111.5) return "Phoenix"
+    if (lat >= 37.5 && lat <= 38 && lng >= -122.5 && lng <= -122) return "San Francisco"
+    if (lat >= 45 && lat <= 45.5 && lng >= -76 && lng <= -75.5) return "Ottawa"
+    if (lat >= 43.5 && lat <= 44 && lng >= -79.5 && lng <= -79) return "Toronto"
+    if (lat >= 45.4 && lat <= 45.6 && lng >= -73.7 && lng <= -73.5) return "Montreal"
+    if (lat >= 51.4 && lat <= 51.6 && lng >= -0.2 && lng <= 0.1) return "London"
+    if (lat >= 48.8 && lat <= 48.9 && lng >= 2.2 && lng <= 2.5) return "Paris"
+    if (lat >= 52.4 && lat <= 52.6 && lng >= 13.3 && lng <= 13.5) return "Berlin"
+    if (lat >= -34 && lat <= -33.5 && lng >= 151 && lng <= 151.5) return "Sydney"
+    if (lat >= -37.9 && lat <= -37.7 && lng >= 144.9 && lng <= 145.1) return "Melbourne"
+    if (lat >= 35.5 && lat <= 35.8 && lng >= 139.6 && lng <= 139.9) return "Tokyo"
+    if (lat >= 1.2 && lat <= 1.4 && lng >= 103.7 && lng <= 104) return "Singapore"
+    return `Location ${Math.abs(lat.toFixed(1))},${Math.abs(lng.toFixed(1))}`
+  }
+
+  const applyPosition = useCallback(async (coords: GeolocationCoordinates, userId?: string) => {
+    const { name, city } = await reverseGeocode(coords.latitude, coords.longitude)
+    const nextLocation = { lat: coords.latitude, lng: coords.longitude, name, city }
+    setLocation(nextLocation)
+    cacheLocation(nextLocation)
+    setLocationPermission("granted")
+    setLoadingLocation(false)
+
+    const id = userId || user?.id
+    if (id) {
+      lastKnownLocationRef.current = { lat: coords.latitude, lng: coords.longitude }
+
+      if (proximityChat) {
+        const chatLat = parseFloat(proximityChat.latitude)
+        const chatLng = parseFloat(proximityChat.longitude)
+        const distanceFromChat = getDistanceMeters(coords.latitude, coords.longitude, chatLat, chatLng)
+        
+        if (distanceFromChat > PROXIMITY_RADIUS_METERS) {
+          await fetch("/api/chat-history", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user_id: id,
+              chat_id: proximityChat.id,
+              action: "leave",
+            }),
+          }).catch(err => console.error("Leave chat failed:", err))
+          setProximityChat(null)
+        }
+      }
+
+      const results = await Promise.allSettled([
+        updateUserLocation(id, coords.latitude, coords.longitude, city),
+        autoJoinProximityChat(coords.latitude, coords.longitude, name, id),
+        fetchNearbyPeople(city, id),
+      ])
+      
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          const labels = ['location update', 'proximity chat', 'nearby people']
+          console.error(`${labels[index]} failed:`, result.reason)
+        }
+      })
+    }
+  }, [autoJoinProximityChat, fetchNearbyPeople, updateUserLocation, user, proximityChat])
+
+  const getPosition = useCallback(async () => {
+    if (isNative) {
+      const status = await Geolocation.checkPermissions()
+      if (status.location !== "granted") {
+        const requested = await Geolocation.requestPermissions({ permissions: ["location"] })
+        if (requested.location !== "granted") {
+          const error = new Error("denied")
+          // @ts-expect-error
+          error.code = 1
+          throw error
+        }
+      }
+      const position = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 })
+      return position
+    }
+
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      throw new Error("insecure")
+    }
+
+    return new Promise<GeolocationPosition>((resolve, reject) => {
+      if (!("geolocation" in navigator)) {
+        const error = new Error("denied")
+        // @ts-expect-error
+        error.code = 1
+        reject(error)
+        return
+      }
+      navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000 })
+    })
+  }, [isNative])
+
+  const requestLocationPermission = async () => {
+    setLocationError("")
+    setLocationPermission("checking")
+    setLoadingLocation(true)
+    
+    try {
+      if (isNative) {
+        const requested = await Geolocation.requestPermissions({ permissions: ["location"] })
+        if (requested.location !== "granted") {
+          setLocationError("Location permission denied. Please enable in settings.")
+          setLocationPermission("denied")
+          setLoadingLocation(false)
+          return
+        }
+        
+        const pos = await getPosition()
+        await applyPosition(pos.coords)
+      } else {
+        if (typeof window !== "undefined" && !window.isSecureContext) {
+          setLocationError("Location requires HTTPS. Using cached location.")
+          setLocationPermission("denied")
+          setLoadingLocation(false)
+          return
+        }
+
+        const pos = await getPosition()
+        await applyPosition(pos.coords)
+      }
+    } catch (err: any) {
+      console.error('[Location] Request failed:', err)
+      let errorMessage = "Unable to access location. "
+      if (err.code === 1) {
+        errorMessage += "Permission denied. Please allow location access in your browser."
+      } else if (err.code === 2) {
+        errorMessage += "Position unavailable. Check your device GPS settings."
+      } else if (err.code === 3) {
+        errorMessage += "Request timed out. Please try again."
+      } else {
+        errorMessage += "Please enable location services."
+      }
+      setLocationError(errorMessage)
+      setLocationPermission("denied")
+      setLoadingLocation(false)
+    }
+  }
+
+  const useDefaultLocation = async () => {
+    setLocationError("")
+    setLoadingLocation(true)
+    
+    try {
+      const pos = await getPosition()
+      await applyPosition(pos.coords)
+    } catch (err) {
+      setLocationError("Unable to get location. Please enable location services.")
+      setLocationPermission("denied")
+      setLoadingLocation(false)
+    }
+  }
+
+  useEffect(() => {
+    const initOnce = async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      if (!authUser) {
+        router.push("/login")
+        return
+      }
+      setUser(authUser)
+
+      const cachedLocStr = localStorage.getItem("tapin:lastLocation")
+      let cachedLoc: { lat: number; lng: number; name: string; city: string } | null = null
+      if (cachedLocStr) {
+        try {
+          cachedLoc = JSON.parse(cachedLocStr)
+          console.log('[Init] Using cached location:', cachedLoc)
+        } catch (err) {
+          console.error('[Init] Failed to parse cached location:', err)
+        }
+      }
+
+      if (cachedLoc) {
+        setLocation(cachedLoc)
+        if (cachedLoc.name) {
+          setLastKnownAddress(cachedLoc.name)
+        }
+        setLocationPermission("granted")
+        setLoadingLocation(false)
+        
+        console.log('[Init] Starting async operations with cached location')
+        Promise.all([
+          fetchHistory(authUser.id),
+          fetchNearbyPeople(cachedLoc.city, authUser.id),
+          autoJoinProximityChat(cachedLoc.lat, cachedLoc.lng, cachedLoc.name, authUser.id),
+          updateUserLocation(authUser.id, cachedLoc.lat, cachedLoc.lng, cachedLoc.city),
+        ]).catch(err => console.error('[Init] Error:', err))
+      }
+
+      if (isNative) {
+        try {
+          const status = await Geolocation.checkPermissions()
+          if (status.location === "granted") {
+            try {
+              const position = await getPosition()
+              await applyPosition(position.coords, authUser.id)
+            } catch (posErr) {
+              console.error('[Init] Native GPS error:', posErr)
+            }
+          } else if (!cachedLoc) {
+            setLocationPermission("prompt")
+            setLoadingLocation(false)
+          }
+        } catch (err) {
+          console.error('[Init] Native location error:', err)
+          if (!cachedLoc) {
+            setLocationPermission("prompt")
+            setLoadingLocation(false)
+          }
+        }
+        return
+      }
+
+      if ("permissions" in navigator) {
+        try {
+          const permission = await navigator.permissions.query({ name: "geolocation" })
+          if (permission.state === "granted") {
+            try {
+              const position = await getPosition()
+              await applyPosition(position.coords, authUser.id)
+            } catch (gpsErr) {
+              console.log('[Init] GPS unavailable, using cached location')
+            }
+          } else if (!cachedLoc) {
+            setLocationPermission("prompt")
+            setLoadingLocation(false)
+          }
+        } catch (err) {
+          console.error('[Init] Permission query error:', err)
+          if (!cachedLoc) {
+            setLocationPermission("prompt")
+            setLoadingLocation(false)
+          }
+        }
+      } else if (!cachedLoc) {
+        setLocationPermission("prompt")
+        setLoadingLocation(false)
+      }
+    }
+    initOnce()
+  }, [])
+
+  useEffect(() => {
+    if (locationPermission !== "granted" || !user?.id) return
+
+    let watchId: number | string | null = null
+
+    const startWatching = async () => {
+      try {
+        if (isNative) {
+          watchId = await Geolocation.watchPosition(
+            { enableHighAccuracy: true },
+            (position) => {
+              if (position) {
+                applyPosition(position.coords, user.id)
+              }
+            }
+          )
+        } else if ("geolocation" in navigator) {
+          watchId = navigator.geolocation.watchPosition(
+            (position) => {
+              applyPosition(position.coords, user.id)
+            },
+            (error) => {
+              console.error('[Location] Watch error:', error.message)
+            },
+            { enableHighAccuracy: true, maximumAge: 30000, timeout: 27000 }
+          )
+        }
+      } catch (err) {
+        console.error('[Location] Watch setup failed:', err)
+      }
+    }
+
+    startWatching()
+
+    return () => {
+      if (watchId !== null) {
+        if (isNative) {
+          Geolocation.clearWatch({ id: watchId as string }).catch(() => {})
+        } else {
+          navigator.geolocation.clearWatch(watchId as number)
+        }
+      }
+    }
+  }, [locationPermission, user, isNative, applyPosition])
+
+  useEffect(() => {
+    if (!selectedChat || !user) return
+
+    fetchMessages(selectedChat.id, user.id)
+
+    const channel = supabase
+      .channel(`location-chat-${selectedChat.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "location_messages",
+          filter: `chat_id=eq.${selectedChat.id}`,
+        },
+        async (payload) => {
+          const { data: userData } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", payload.new.user_id)
+            .single()
+
+          if (userData) {
+            const newMsg = { ...payload.new, user: userData } as LocationMessageWithUser
+            setMessages((prev) => {
+              if (prev.find((m) => m.id === newMsg.id)) return prev
+              return [...prev, newMsg]
+            })
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [selectedChat, supabase, fetchMessages, user])
+
+  useEffect(() => {
+    if (proximityChat?.id) {
+      fetchLocationPhotos(proximityChat.id)
+    } else if (location) {
+      fetchLocationPhotos(undefined, location.lat, location.lng)
+    }
+  }, [proximityChat, location, fetchLocationPhotos])
+
+  const sendMessage = async () => {
+    if (!newMessage.trim() || !selectedChat || !user) return
+    setSending(true)
+
+    const messageContent = newMessage.trim()
+    setNewMessage("")
+
+    try {
+      const response = await fetch("/api/location-chat/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: selectedChat.id,
+          user_id: user.id,
+          content: messageContent,
+          message_type: "text",
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        console.error('[SendMessage] Failed:', response.status, errorData)
+        
+        if (response.status === 403) {
+          setNetworkError("You're too far from this chat location")
+        } else if (response.status === 400) {
+          setNetworkError("Failed to send message. Try again.")
+        }
+        
+        setNewMessage(messageContent)
+        return
+      }
+
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(`tapin:messages:${selectedChat.id}`)
+      }
+      
+      scrollToBottom()
+    } catch (error) {
+      console.error("Failed to send message:", error)
+      setNewMessage(messageContent)
+      setNetworkError("Connection error. Check your internet.")
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const handleEmojiClick = (emojiData: EmojiClickData) => {
+    setNewMessage((prev) => prev + emojiData.emoji)
+    setShowEmojiPicker(false)
+  }
+
+  const handleGifSelect = async (gif: TenorImage) => {
+    if (!selectedChat || !user) return
+    setShowGifPicker(false)
+    
+    if (!gif?.url) {
+      console.error('[GIF] No URL provided')
+      return
+    }
+    
+    setSending(true)
+
+    try {
+      const response = await fetch("/api/location-chat/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: selectedChat.id,
+          user_id: user.id,
+          content: gif.url,
+          message_type: "gif",
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        console.error('[GIF] Failed to send:', response.status, errorData)
+        
+        if (response.status === 403) {
+          setNetworkError("You're too far from this chat location")
+        } else {
+          setNetworkError("Failed to send GIF. Try again.")
+        }
+      }
+    } catch (error) {
+      console.error('[GIF] Error:', error)
+      setNetworkError("Connection error. Check your internet.")
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const formatTime = (date: string) => {
+    const d = new Date(date)
+    const now = new Date()
+    const diff = now.getTime() - d.getTime()
+    const hours = Math.floor(diff / (1000 * 60 * 60))
+    if (hours < 1) return "Just now"
+    if (hours < 24) return `${hours}h ago`
+    return `${Math.floor(hours / 24)}d ago`
+  }
+
+  const handleImageUpload = async (file?: File) => {
+    if (!selectedChat || !user || !file) return
+      
+    setImageError("")
+    setShowEmojiPicker(false)
+    setShowGifPicker(false)
+
+    if (!file.type.startsWith("image/")) {
+      setImageError("Only images are allowed")
+      return
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setImageError("Images over 5MB are blocked")
+      return
+    }
+
+    setUploadingImage(true)
+
+    try {
+      const formData = new FormData()
+      formData.append("file", file)
+
+      const uploadRes = await fetch("/api/location-chat/upload", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!uploadRes.ok) {
+        const err = await uploadRes.json().catch(() => ({} as Record<string, string>))
+        throw new Error(err.error || "Could not upload image")
+      }
+
+      const { url } = await uploadRes.json()
+
+      const messageRes = await fetch("/api/location-chat/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: selectedChat.id,
+          user_id: user.id,
+          content: url,
+          message_type: "image",
+        }),
+      })
+
+      if (!messageRes.ok) {
+        const errorData = await messageRes.json().catch(() => ({ error: 'Unknown error' }))
+        if (messageRes.status === 403) {
+          throw new Error("You're too far from this chat location")
+        } else {
+          throw new Error(errorData.error || "Failed to send image")
+        }
+      }
+
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(`tapin:messages:${selectedChat.id}`)
+      }
+    } catch (error: any) {
+      setImageError(error.message || "Could not upload image")
+    } finally {
+      setUploadingImage(false)
+    }
+  }
+
+  const handleLocationPhotoUpload = async (file?: File) => {
+    if (!file || !location || !user) return
+    
+    setImageError("")
+
+    if (!file.type.startsWith("image/")) {
+      setImageError("Only images are allowed")
+      return
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setImageError("Images over 5MB are blocked")
+      return
+    }
+
+    setUploadingLocationPhoto(true)
+
+    try {
+      const formData = new FormData()
+      formData.append("file", file)
+      formData.append("caption", photoCaption)
+      formData.append("latitude", location.lat.toString())
+      formData.append("longitude", location.lng.toString())
+      if (proximityChat?.id) {
+        formData.append("chatId", proximityChat.id)
+      }
+
+      const uploadRes = await fetch("/api/location-photos", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!uploadRes.ok) {
+        const err = await uploadRes.json().catch(() => ({} as Record<string, string>))
+        throw new Error(err.error || "Could not upload photo")
+      }
+
+      const { photo } = await uploadRes.json()
+      setLocationPhotos((prev) => [photo, ...prev])
+      setPhotoCaption("")
+      setShowPhotoModal(false)
+    } catch (error: any) {
+      setImageError(error.message || "Could not upload photo")
+    } finally {
+      setUploadingLocationPhoto(false)
+    }
+  }
+
+  const isCurrentChat = (chatId: string) => {
+    if (!proximityChat || !location) return false
+    if (proximityChat.id !== chatId) return false
+    
+    const chatLat = parseFloat(proximityChat.latitude)
+    const chatLng = parseFloat(proximityChat.longitude)
+    const distance = getDistanceMeters(location.lat, location.lng, chatLat, chatLng)
+    
+    return distance <= PROXIMITY_RADIUS_METERS
+  }
+
+  const filteredHistory = useMemo(() => {
+    return recentHistory.filter(visit => visit.chat?.id !== proximityChat?.id)
+  }, [recentHistory, proximityChat?.id])
+
+  const isInProximityChat = useMemo(() => {
+    if (!selectedChat || !proximityChat || !location) return false
+    if (selectedChat.id !== proximityChat.id) return false
+    
+    const chatLat = parseFloat(proximityChat.latitude)
+    const chatLng = parseFloat(proximityChat.longitude)
+    const distance = getDistanceMeters(location.lat, location.lng, chatLat, chatLng)
+    
+    return distance <= PROXIMITY_RADIUS_METERS
+  }, [selectedChat?.id, proximityChat?.id, location, proximityChat?.latitude, proximityChat?.longitude])
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    router.push("/login")
+  }
+
+  const loadingShell = (
+    <div className="min-h-[100dvh] safe-bottom safe-horizontal flex flex-col bg-background pb-28">
+      <header className="sticky top-0 z-50 glass border-b border-border/50 safe-top safe-horizontal">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Radio className="w-6 h-6 text-cyan-400" />
+            <span className="text-xl font-bold">TapIn</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1 text-sm text-muted-foreground">
+              <MapPin className="w-4 h-4" />
+              <span className="truncate max-w-[120px]">Loading location...</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-xl h-9 w-9 text-muted-foreground"
+              disabled
+            >
+              <LogOut className="w-5 h-5" />
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-4 space-y-4">
+        <div className="glass rounded-2xl border border-border/50 overflow-hidden">
+          <div className="h-[300px] sm:h-[350px] bg-secondary/60 animate-pulse" />
+          <div className="p-3 border-t border-border/50 flex items-center justify-between text-sm">
+            <div className="h-4 w-40 bg-secondary/60 rounded-full animate-pulse" />
+          </div>
+        </div>
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, idx) => (
+            <div key={idx} className="glass rounded-2xl p-4 border border-border/50 animate-pulse">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-secondary/60" />
+                <div className="flex-1 min-w-0 space-y-2">
+                  <div className="h-4 w-32 bg-secondary/60 rounded-full" />
+                  <div className="h-3 w-48 bg-secondary/40 rounded-full" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </main>
+
+      <nav className="fixed bottom-0 left-0 right-0 glass border-t border-border/50 z-50 safe-bottom safe-horizontal">
+        <div className="max-w-4xl mx-auto px-4 py-2 flex items-center justify-around">
+          <div className="flex flex-col items-center gap-1 py-2 px-6">
+            <MapPin className="w-6 h-6 text-cyan-400" />
+            <span className="text-xs text-cyan-400 font-medium">Nearby</span>
+          </div>
+          <Link href="/app/people" className="flex flex-col items-center gap-1 py-2 px-6">
+            <Users className="w-6 h-6 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Friends</span>
+          </Link>
+          <Link href="/app/chats" className="flex flex-col items-center gap-1 py-2 px-6">
+            <MessageCircle className="w-6 h-6 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Chats</span>
+          </Link>
+          <Link href="/app/settings" className="flex flex-col items-center gap-1 py-2 px-6">
+            <Settings className="w-6 h-6 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Settings</span>
+          </Link>
+        </div>
+      </nav>
+    </div>
+  )
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    
+    const cleanup = startOutboxProcessor()
+    
+    return () => {
+      if (cleanup) cleanup()
+    }
+  }, [])
+
+  if (loadingLocation && locationPermission === "checking") {
+    return loadingShell
+  }
+
+  if (locationPermission === "prompt" || locationPermission === "denied") {
+    return (
+      <div className="min-h-[100dvh] safe-inset flex flex-col items-center justify-center gap-6 px-6 text-center">
+        <div className="w-24 h-24 rounded-full bg-cyan-500/20 flex items-center justify-center">
+          <Navigation className="w-12 h-12 text-cyan-400" />
+        </div>
+        <div className="space-y-2 max-w-sm">
+          <h1 className="text-2xl font-bold">Enable Location</h1>
+          <p className="text-muted-foreground">
+            TapIn needs your location to connect you with people nearby. Your location is only shared while you&apos;re using the app.
+          </p>
+        </div>
+        {locationPermission === "denied" && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 max-w-sm">
+            <p className="text-sm text-amber-400">
+              Location access was denied. Please enable it in your browser/device settings, then tap the button below.
+            </p>
+          </div>
+        )}
+        {locationError && (
+          <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-4 max-w-sm">
+            <p className="text-sm text-rose-400">{locationError}</p>
+          </div>
+        )}
+        <div className="flex flex-col gap-3 w-full max-w-xs">
+          <Button
+            onClick={requestLocationPermission}
+            className="w-full h-12 rounded-xl bg-cyan-500 hover:bg-cyan-600 font-semibold"
+          >
+            <MapPin className="w-5 h-5 mr-2" />
+            Allow Location Access
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={useDefaultLocation}
+            className="w-full h-12 rounded-xl text-muted-foreground"
+          >
+            Continue without location
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  if (loadingLocation) {
+    return loadingShell
+  }
+
+  if (selectedChat) {
+    return (
+      <>
+        <OfflineBanner />
+        <div className="min-h-[100dvh] safe-bottom safe-horizontal grid grid-rows-[auto_1fr_auto] bg-gradient-to-b from-slate-950 via-slate-900 to-black text-white">
+          <header className="sticky top-0 z-50 glass border-b border-border/50 safe-top safe-horizontal">
+            <div className="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-xl flex-shrink-0"
+                onClick={() => setSelectedChat(null)}
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </Button>
+              <div className="w-10 h-10 rounded-xl bg-cyan-500/20 flex items-center justify-center flex-shrink-0">
+                <Radio className="w-5 h-5 text-cyan-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h1 className="font-bold truncate text-lg">{location?.name || 'Unknown Location'}</h1>
+                <p className="text-xs text-muted-foreground">Chat with people nearby</p>
+              </div>
+            </div>
+          </header>
+
+          <div 
+            ref={messagesContainerRef}
+            className="overflow-y-auto px-4 py-4 overscroll-contain"
+          >
+            <div className="space-y-4 pb-4 max-w-4xl mx-auto">
+              {messages.length === 0 && (
+                <div className="text-center py-12 text-muted-foreground">
+                  <MessageCircle className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p className="text-lg">No messages yet</p>
+                  <p className="text-sm mt-1">Say hello!</p>
+                </div>
+              )}
+              {messages.map((msg) => {
+                const isOwn = msg.user_id === user?.id
+                const isGif = msg.content?.includes("tenor.com") || msg.content?.includes("giphy.com") || msg.content?.match(/\.(gif|webp)(\?|$)/i)
+                const isImage = msg.content?.startsWith("data:image") || msg.content?.match(/\.(png|jpe?g|webp|heic|bmp)(\?|$)/i)
+                const isPending = msg.status === "pending"
+                const isFailed = msg.status === "failed"
+                
+                return (
+                  <div
+                    key={msg.client_id || msg.id}
+                    className={`flex gap-3 ${isOwn ? "flex-row-reverse" : ""}`}
+                  >
+                    <Avatar className="w-9 h-9 flex-shrink-0">
+                      <AvatarImage src={msg.user?.avatar_url || ""} />
+                      <AvatarFallback className="bg-cyan-500/20 text-cyan-400 text-sm">
+                        {msg.user?.username?.[0]?.toUpperCase() || "?"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className={`max-w-[75%] ${isOwn ? "items-end" : "items-start"} flex flex-col`}>
+                      <div className={`flex items-center gap-2 mb-1 ${isOwn ? "flex-row-reverse" : ""}`}>
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {isOwn ? "You" : msg.user?.display_name || msg.user?.username}
+                        </span>
+                        <span className="text-xs text-muted-foreground/50">
+                          {formatTime(msg.created_at)}
+                        </span>
+                        {isPending && (
+                          <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
+                        )}
+                        {isFailed && (
+                          <AlertCircle className="w-3 h-3 text-rose-400" />
+                        )}
+                      </div>
+                      <div
+                        className={`rounded-2xl ${
+                          isGif || isImage
+                            ? "p-1 bg-transparent"
+                            : `px-4 py-2.5 ${
+                                isOwn
+                                  ? isFailed
+                                    ? "bg-rose-500/20 text-white rounded-tr-sm border border-rose-500/40"
+                                    : "bg-cyan-500 text-white rounded-tr-sm"
+                                  : "bg-secondary/80 rounded-tl-sm"
+                              }`
+                        } ${isPending ? "opacity-70" : ""}`}
+                      >
+                        {isGif || isImage ? (
+                          <img
+                            src={msg.content}
+                            alt="Message"
+                            className="rounded-xl max-w-full max-h-[220px] object-contain"
+                          />
+                        ) : (
+                          <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
+                        )}
+                      </div>
+                      {isFailed && isOwn && msg.client_id && (
+                        <Button
+                          onClick={() => retryMessage(msg.client_id!)}
+                          variant="ghost"
+                          size="sm"
+                          className="mt-1 text-xs text-rose-400 hover:text-rose-300 h-auto py-1 px-2"
+                        >
+                          Tap to retry
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+              <div ref={messagesEndRef} />
+            </div>
+          </div>
+
+          {isInProximityChat ? (
+            <div className="p-4 glass border-t border-border/50 flex-shrink-0">
+              <div className="max-w-4xl mx-auto">
+                {imageError && (
+                  <div className="mb-3 text-sm text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 w-fit">
+                    {imageError}
+                  </div>
+                )}
+                {showEmojiPicker && (
+                  <div className="absolute bottom-20 left-4 right-4 z-50">
+                    <div className="relative max-w-sm mx-auto">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute -top-2 -right-2 z-10 rounded-full bg-secondary h-8 w-8"
+                        onClick={() => setShowEmojiPicker(false)}
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                      <EmojiPicker
+                        onEmojiClick={handleEmojiClick}
+                        theme="dark"
+                        width="100%"
+                        height={300}
+                        previewConfig={{ showPreview: false }}
+                      />
+                    </div>
+                  </div>
+                )}
+                {showGifPicker && (
+                  <div className="absolute bottom-20 left-4 right-4 z-50">
+                    <div className="relative max-w-sm mx-auto">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute -top-2 -right-2 z-10 rounded-full bg-secondary h-8 w-8"
+                        onClick={() => setShowGifPicker(false)}
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                      <GifPicker
+                        tenorApiKey={process.env.NEXT_PUBLIC_TENOR_API_KEY || ""}
+                        onGifClick={handleGifSelect}
+                        theme="dark"
+                        width="100%"
+                        height={300}
+                      />
+                    </div>
+                  </div>
+                )}
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    handleImageUpload(file)
+                    e.target.value = ""
+                  }}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-xl h-11 w-11 flex-shrink-0"
+                    onClick={() => {
+                      setShowGifPicker(false)
+                      setShowEmojiPicker(!showEmojiPicker)
+                    }}
+                  >
+                    <Smile className="w-5 h-5 text-muted-foreground" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-xl h-11 w-11 flex-shrink-0"
+                    onClick={() => imageInputRef.current?.click()}
+                    disabled={uploadingImage || sending}
+                  >
+                    {uploadingImage ? <Loader2 className="w-5 h-5 animate-spin" /> : <Image className="w-5 h-5 text-muted-foreground" />}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-xl h-11 w-11 flex-shrink-0"
+                    onClick={() => {
+                      setShowEmojiPicker(false)
+                      setShowGifPicker(!showGifPicker)
+                    }}
+                  >
+                    <MessageCircle className="w-5 h-5 text-muted-foreground" />
+                  </Button>
+                  <Input
+                    placeholder="Type a message..."
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
+                    className="flex-1 bg-secondary/50 border-border/50 rounded-xl h-11"
+                    disabled={sending || uploadingImage}
+                    onFocus={() => {
+                      setShowEmojiPicker(false)
+                      setShowGifPicker(false)
+                    }}
+                  />
+                  <Button
+                    onClick={sendMessage}
+                    disabled={!newMessage.trim() || sending || uploadingImage}
+                    className="rounded-xl bg-cyan-500 hover:bg-cyan-600 h-11 w-11"
+                  >
+                    {sending ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Send className="w-5 h-5" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="p-4 glass border-t border-border/50 flex-shrink-0">
+              <div className="max-w-4xl mx-auto text-center">
+                <div className="flex items-center justify-center gap-2 text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl py-3 px-4">
+                  <Info className="w-5 h-5" />
+                  <span>You can view this chat but can't send messages. Return to this location to participate.</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <OfflineBanner />
+    <div className="min-h-[100dvh] safe-bottom safe-horizontal flex flex-col bg-background pb-28">
+      <header className="sticky top-0 z-50 glass border-b border-border/50 safe-top safe-horizontal">
+        <div className="max-w-4xl mx-auto px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Radio className="w-6 h-6 text-cyan-400" />
+            <span className="text-xl font-bold">TapIn</span>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-500/20 border border-cyan-500/30">
+              <MapPin className="w-4 h-4 text-cyan-400" />
+              <span className="text-sm font-medium text-cyan-400">
+                {location?.name || 'Your Location'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-6 space-y-6 pb-32">
+        {networkError && (
+          <div className="glass rounded-2xl p-3 border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm text-center">
+            {networkError}
+          </div>
+        )}
+
+        <div className="glass rounded-2xl border border-border/50 overflow-hidden">
+          <div className="flex border-b border-border/50">
+            <button
+              onClick={() => setActiveTab("map")}
+              className={`flex-1 flex items-center justify-center gap-2 py-4 font-medium transition-all ${
+                activeTab === "map"
+                  ? "text-cyan-400 border-b-2 border-cyan-400"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <MapIcon className="w-5 h-5" />
+              Heat Map
+            </button>
+            <button
+              onClick={() => setActiveTab("chat")}
+              className={`flex-1 flex items-center justify-center gap-2 py-4 font-medium transition-all ${
+                activeTab === "chat"
+                  ? "text-cyan-400 border-b-2 border-cyan-400"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Radio className="w-5 h-5" />
+              Location Chat
+            </button>
+            <button
+              onClick={() => setActiveTab("photos")}
+              className={`flex-1 flex items-center justify-center gap-2 py-4 font-medium transition-all ${
+                activeTab === "photos"
+                  ? "text-cyan-400 border-b-2 border-cyan-400"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Image className="w-5 h-5" />
+              Photos
+            </button>
+          </div>
+
+          {activeTab === "map" && (
+            <>
+              <div className="h-[380px] sm:h-[440px]">
+                {location && (
+                  <Suspense fallback={
+                    <div className="w-full h-full flex items-center justify-center">
+                      <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+                    </div>
+                  }>
+                    <HeatMap
+                      people={nearbyPeople}
+                      center={[location.lat, location.lng]}
+                      currentUserLocation={[location.lat, location.lng]}
+                    />
+                  </Suspense>
+                )}
+              </div>
+              <div className="p-4 border-t border-border/50">
+                <div className="flex items-center justify-center gap-2 text-base">
+                  <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                  <span className="font-medium">{nearbyPeople.length} people nearby</span>
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeTab === "chat" && (
+            <div className="p-6 space-y-4">
+              {proximityChat && (
+                <button
+                  onClick={() => setSelectedChat(proximityChat)}
+                  className="w-full glass rounded-2xl p-6 border-2 border-cyan-500/50 bg-cyan-500/10 hover:bg-cyan-500/15 transition-all text-left"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-xl bg-cyan-500/30 flex items-center justify-center relative flex-shrink-0">
+                      <Radio className="w-7 h-7 text-cyan-400" />
+                      <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-green-400 rounded-full animate-pulse" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h2 className="font-bold text-xl truncate">
+                        {proximityChat.location_name}
+                      </h2>
+                      <p className="text-sm text-muted-foreground mt-1">Tap to join this location chat</p>
+                    </div>
+                  </div>
+                </button>
+              )}
+              
+              {filteredHistory.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Clock className="w-4 h-4" />
+                    <span>Recent Chats (Past 48h)</span>
+                  </div>
+                  {filteredHistory
+                    .map((visit) => {
+                      const isActive = visit.is_current
+                      return (
+                        <button
+                          key={visit.id}
+                          onClick={() => visit.chat && setSelectedChat(visit.chat)}
+                          className={`w-full glass rounded-xl p-4 border transition-all text-left ${
+                            isActive 
+                              ? "border-cyan-500/40 bg-cyan-500/5" 
+                              : "border-border/40 hover:border-border/60"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                              isActive ? "bg-cyan-500/20" : "bg-secondary/60"
+                            }`}>
+                              <Radio className="w-5 h-5 text-cyan-400" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-semibold text-sm truncate">
+                                {visit.chat?.location_name && !visit.chat.location_name.includes(',') && visit.chat.location_name !== 'My Location' && visit.chat.location_name !== 'Unknown'
+                                  ? visit.chat.location_name
+                                  : visit.location_name || 'Unknown Location'}
+                              </h3>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                {isActive ? "Current location" : `Visited ${formatTime(visit.visited_at)}`}
+                              </p>
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === "photos" && (
+            <div className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold">Location Photos</h3>
+                <Button
+                  onClick={() => setShowPhotoModal(true)}
+                  className="bg-cyan-500 hover:bg-cyan-600 rounded-xl"
+                  size="sm"
+                >
+                  <Image className="w-4 h-4 mr-2" />
+                  Add Photo
+                </Button>
+              </div>
+
+              {imageError && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-sm text-amber-200">
+                  {imageError}
+                </div>
+              )}
+
+              {locationPhotos.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Image className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p className="text-lg">No photos yet</p>
+                  <p className="text-sm mt-1">Be the first to add a photo of this area</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  {locationPhotos.map((photo) => (
+                    <div
+                      key={photo.id}
+                      className="glass rounded-xl overflow-hidden border border-border/50 hover:border-cyan-500/50 transition-all"
+                    >
+                      <div className="aspect-square relative">
+                        <img
+                          src={photo.photo_url}
+                          alt={photo.caption || "Location photo"}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      {photo.caption && (
+                        <div className="p-2">
+                          <p className="text-xs text-muted-foreground line-clamp-2">{photo.caption}</p>
+                        </div>
+                      )}
+                      <div className="p-2 border-t border-border/50 flex items-center gap-2">
+                        <Avatar className="w-6 h-6">
+                          <AvatarImage src={photo.user?.avatar_url} />
+                          <AvatarFallback className="bg-cyan-500/20 text-cyan-400 text-xs">
+                            {photo.user?.username?.[0]?.toUpperCase() || "?"}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="text-xs text-muted-foreground truncate">
+                          {photo.user?.display_name || photo.user?.username}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {showPhotoModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm safe-inset">
+            <div className="bg-secondary/95 rounded-2xl p-6 max-w-md w-full mx-4 border border-border/50">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold">Add Location Photo</h3>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setShowPhotoModal(false)
+                    setPhotoCaption("")
+                    setImageError("")
+                  }}
+                  className="rounded-xl"
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm text-muted-foreground mb-2 block">
+                    Caption (optional)
+                  </label>
+                  <Input
+                    value={photoCaption}
+                    onChange={(e) => setPhotoCaption(e.target.value)}
+                    placeholder="Describe this location..."
+                    className="bg-background/50 border-border/50 rounded-xl"
+                    maxLength={200}
+                  />
+                </div>
+
+                <input
+                  ref={locationPhotoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) handleLocationPhotoUpload(file)
+                    e.target.value = ""
+                  }}
+                />
+
+                <Button
+                  onClick={() => locationPhotoInputRef.current?.click()}
+                  disabled={uploadingLocationPhoto}
+                  className="w-full bg-cyan-500 hover:bg-cyan-600 rounded-xl h-12"
+                >
+                  {uploadingLocationPhoto ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <>
+                      <Image className="w-5 h-5 mr-2" />
+                      Choose Photo
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      <nav className="fixed bottom-0 left-0 right-0 glass border-t border-border/50 z-50 safe-bottom safe-horizontal">
+        <div className="max-w-4xl mx-auto px-4 py-2 flex items-center justify-around">
+          <div className="flex flex-col items-center gap-1 py-2 px-6">
+            <MapPin className="w-6 h-6 text-cyan-400" />
+            <span className="text-xs text-cyan-400 font-medium">Nearby</span>
+          </div>
+          <Link href="/app/people" className="flex flex-col items-center gap-1 py-2 px-6">
+            <Users className="w-6 h-6 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Friends</span>
+          </Link>
+          <Link href="/app/chats" className="flex flex-col items-center gap-1 py-2 px-6">
+            <MessageCircle className="w-6 h-6 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Chats</span>
+          </Link>
+          <Link href="/app/settings" className="flex flex-col items-center gap-1 py-2 px-6">
+            <Settings className="w-6 h-6 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Settings</span>
+          </Link>
+        </div>
+      </nav>
+    </div>
+    </>
+  )
+}
