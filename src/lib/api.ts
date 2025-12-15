@@ -7,11 +7,12 @@ export function getApiUrl(path: string): string {
   
   const cleanPath = path.startsWith('/') ? path : `/${path}`
   
-  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-    return cleanPath
+  // Always use production URL when available (for TestFlight/production builds)
+  if (API_BASE_URL) {
+    return `${API_BASE_URL}${cleanPath}`
   }
   
-  return `${API_BASE_URL}${cleanPath}`
+  return cleanPath
 }
 
 export async function apiRequest(path: string, options?: RequestInit): Promise<Response> {
