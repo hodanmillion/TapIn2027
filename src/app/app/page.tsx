@@ -1768,6 +1768,10 @@ export default function AppPage() {
                         currentUserLocation={location ? [location.lat, location.lng] : undefined}
                         photos={locationPhotos}
                         onPhotoClick={handlePhotoClick}
+                        onMapClick={(lat, lng) => {
+                          setSelectedPhotoLocation({ lat, lng })
+                          setImageError("")
+                        }}
                       />
                     </Suspense>
                   )}
@@ -1928,29 +1932,27 @@ export default function AppPage() {
               setCapturedPhotoDataUrl(null)
               setSelectedPhotoLocation(null)
             }}>
-              {!selectedPhotoLocation && !capturedPhotoDataUrl && (
-                <div className="absolute inset-0 z-10">
-                  {(searchedLocation || location) && (
-                    <Suspense fallback={
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
-                      </div>
-                    }>
-                      <HeatMap
-                        people={nearbyPeople}
-                        center={searchedLocation ? [searchedLocation.lat, searchedLocation.lng] : [location!.lat, location!.lng]}
-                        currentUserLocation={location ? [location.lat, location.lng] : undefined}
-                        photos={locationPhotos}
-                        onPhotoClick={handlePhotoClick}
-                        onMapClick={(lat, lng) => {
-                          setSelectedPhotoLocation({ lat, lng })
-                          setImageError("")
-                        }}
-                      />
-                    </Suspense>
-                  )}
-                </div>
-              )}
+              <div className="absolute inset-0 z-10">
+                {(searchedLocation || location) && (
+                  <Suspense fallback={
+                    <div className="w-full h-full flex items-center justify-center">
+                      <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+                    </div>
+                  }>
+                    <HeatMap
+                      people={nearbyPeople}
+                      center={searchedLocation ? [searchedLocation.lat, searchedLocation.lng] : [location!.lat, location!.lng]}
+                      currentUserLocation={location ? [location.lat, location.lng] : undefined}
+                      photos={locationPhotos}
+                      onPhotoClick={handlePhotoClick}
+                      onMapClick={(lat, lng) => {
+                        setSelectedPhotoLocation({ lat, lng })
+                        setImageError("")
+                      }}
+                    />
+                  </Suspense>
+                )}
+              </div>
 
               <div className="relative z-20 bg-secondary/95 rounded-2xl p-6 max-w-md w-full mx-4 border border-border/50 shadow-2xl" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-4">
