@@ -310,7 +310,7 @@ export default function AppPage() {
       }
     } catch (err: any) {
       if (err.name !== 'AbortError' && !cached) {
-        setNetworkError("Could not refresh nearby people. Check connection.")
+        console.log('[Nearby] Fetch failed, using cached data')
       }
     } finally {
       fetchNearbyInProgressRef.current = false
@@ -545,9 +545,6 @@ export default function AppPage() {
        if (!res.ok) {
          const errorData = await res.json().catch(() => ({ error: 'Unknown error' }))
          console.error('[FetchMessages] API error:', res.status, errorData)
-         if (res.status === 403 && !cached) {
-           setNetworkError("You're outside the chat area")
-         }
          return
        }
        
@@ -558,9 +555,6 @@ export default function AppPage() {
      } catch (err: any) {
        if (err.name !== 'AbortError') {
          console.error('[FetchMessages] Fetch error:', err)
-         if (!cached) {
-           setNetworkError("Live messages paused. Check connection.")
-         }
        }
      } finally {
        fetchAbortControllersRef.current.delete(fetchKey)
@@ -949,12 +943,6 @@ export default function AppPage() {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
         console.error('[SendMessage] Failed:', response.status, errorData)
         
-        if (response.status === 403) {
-          setNetworkError("You're too far from this chat location")
-        } else if (response.status === 400) {
-          setNetworkError("Failed to send message. Try again.")
-        }
-        
         setNewMessage(messageContent)
         return
       }
@@ -967,7 +955,6 @@ export default function AppPage() {
     } catch (error) {
       console.error("Failed to send message:", error)
       setNewMessage(messageContent)
-      setNetworkError("Connection error. Check your internet.")
     } finally {
       setSending(false)
     }
@@ -982,13 +969,11 @@ export default function AppPage() {
     if (!searchAddress.trim()) return
     
     setIsSearching(true)
-    setNetworkError("")
 
     try {
       const res = await fetch(getApiUrl(`/api/geocode?address=${encodeURIComponent(searchAddress.trim())}`))
       
       if (!res.ok) {
-        setNetworkError("Location not found. Try a different search.")
         return
       }
 
@@ -1012,7 +997,6 @@ export default function AppPage() {
       }
     } catch (error) {
       console.error("[Search] Error:", error)
-      setNetworkError("Search failed. Check connection.")
     } finally {
       setIsSearching(false)
     }
@@ -1055,16 +1039,9 @@ export default function AppPage() {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
         console.error('[GIF] Failed to send:', response.status, errorData)
-        
-        if (response.status === 403) {
-          setNetworkError("You're too far from this chat location")
-        } else {
-          setNetworkError("Failed to send GIF. Try again.")
-        }
       }
     } catch (error) {
       console.error('[GIF] Error:', error)
-      setNetworkError("Connection error. Check your internet.")
     } finally {
       setSending(false)
     }
@@ -1286,6 +1263,26 @@ export default function AppPage() {
     const distance = getDistanceMeters(location.lat, location.lng, chatLat, chatLng)
     
     return distance <= PROXIMITY_RADIUS_METERS
+  }
+
+  const getDisplayableChatName = (chatName: string | null, fallbackName: string | null): string => {
+    if (!chatName) {
+      return fallbackName || lastKnownAddress || 'Location'
+    }
+    
+    // Check if it looks like coordinates (e.g., "45.23,-75.73" or "Location 45.23,75.73")
+    const coordPattern = /^(Location\s+)?[-+]?\d+\.?\d*\s*,\s*[-+]?\d+\.?\d*$/i
+    if (coordPattern.test(chatName.trim())) {
+      return fallbackName || lastKnownAddress || 'Current Location'
+    }
+    
+    // Filter out generic/placeholder names
+    const genericNames = ['My Location', 'Unknown', 'Locating...']
+    if (genericNames.includes(chatName)) {
+      return fallbackName || lastKnownAddress || 'Current Location'
+    }
+    
+    return chatName
   }
 
   const filteredHistory = useMemo(() => {
@@ -1721,12 +1718,6 @@ export default function AppPage() {
         </header>
 
         <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-6 space-y-6 pb-32">
-          {networkError && (
-            <div className="glass rounded-2xl p-3 border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm text-center">
-              {networkError}
-            </div>
-          )}
-
           <div className="glass rounded-2xl border border-border/50 overflow-hidden">
             <div className="flex border-b border-border/50">
               <button
@@ -1807,7 +1798,7 @@ export default function AppPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <h2 className="font-bold text-xl truncate">
-                          {proximityChat.location_name}
+                          {getDisplayableChatName(proximityChat.location_name, null)}
                         </h2>
                         <p className="text-sm text-muted-foreground mt-1">Tap to join this location chat</p>
                       </div>
@@ -1842,9 +1833,7 @@ export default function AppPage() {
                               </div>
                               <div className="flex-1 min-w-0">
                                 <h3 className="font-semibold text-sm truncate">
-                                  {visit.chat?.location_name && !visit.chat.location_name.includes(',') && visit.chat.location_name !== 'My Location' && visit.chat.location_name !== 'Unknown'
-                                    ? visit.chat.location_name
-                                    : visit.location_name || 'Unknown Location'}
+                                  {getDisplayableChatName(visit.chat?.location_name || null, visit.location_name)}
                                 </h3>
                                 <p className="text-xs text-muted-foreground mt-0.5">
                                   {isActive ? "Current location" : `Visited ${formatTime(visit.visited_at)}`}
