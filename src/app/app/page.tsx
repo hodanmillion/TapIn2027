@@ -99,6 +99,7 @@ const DEBOUNCE_DELAY = 300
 const LOCATION_UPDATE_INTERVAL = 30000
 const NEARBY_CACHE_TTL = 5
 const NEARBY_PEOPLE_LIMIT = 100
+const AUTO_JOIN_DELAY = 2000
 
 function debounce<T extends (...args: any[]) => any>(func: T, wait: number): (...args: Parameters<T>) => void {
   let timeout: NodeJS.Timeout | null = null
@@ -465,9 +466,18 @@ export default function AppPage() {
        const roundedLat = Math.round(lat * 1000) / 1000
        const roundedLng = Math.round(lng * 1000) / 1000
        
-       const finalLocationName = locationName && locationName !== "Unknown" && locationName !== "Locating..."
-         ? locationName 
-         : `Location ${Math.abs(roundedLat)},${Math.abs(roundedLng)}`
+       let finalLocationName = locationName
+       
+       if (!locationName || locationName === "Unknown" || locationName === "Locating..." || /^Location\s+[-+]?\d+\.?\d*\s*,\s*[-+]?\d+\.?\d*$/i.test(locationName)) {
+         await new Promise(resolve => setTimeout(resolve, AUTO_JOIN_DELAY))
+         
+         const currentAddress = lastKnownAddress
+         if (currentAddress && currentAddress !== "Locating..." && currentAddress !== "Unknown") {
+           finalLocationName = currentAddress
+         } else {
+           finalLocationName = `Location ${Math.abs(roundedLat)},${Math.abs(roundedLng)}`
+         }
+       }
        
        const controller = new AbortController()
        const timeoutId = setTimeout(() => controller.abort(), 8000)
@@ -520,11 +530,10 @@ export default function AppPage() {
      } finally {
        autoJoinInProgressRef.current = false
      }
-   }, [fetchHistory])
+   }, [fetchHistory, lastKnownAddress])
 
   const fetchMessages = useCallback(async (chatId: string, userId?: string) => {
      if (!userId) {
-       console.warn('[FetchMessages] No userId provided')
        return
      }
      const cacheKey = `tapin:messages:${chatId}`
@@ -546,7 +555,9 @@ export default function AppPage() {
        
        if (!res.ok) {
          const errorData = await res.json().catch(() => ({ error: 'Unknown error' }))
-         console.error('[FetchMessages] API error:', res.status, errorData)
+         if (errorData.error !== 'outside_radius') {
+           console.error('[FetchMessages] API error:', res.status, errorData)
+         }
          return
        }
        
@@ -1146,6 +1157,12 @@ export default function AppPage() {
       if (photo.dataUrl) {
         console.log('[Camera] Photo captured, dataUrl length:', photo.dataUrl.length)
         setCapturedPhotoDataUrl(photo.dataUrl)
+        
+        // On iOS, auto-upload with current location
+        if (isNative && location) {
+          const file = dataUrlToFile(photo.dataUrl, `photo-${Date.now()}.jpg`)
+          await handleLocationPhotoUpload(file)
+        }
       }
     } catch (error: any) {
       console.error('[Camera] Capture error:', error)
@@ -1169,6 +1186,12 @@ export default function AppPage() {
       if (photo.dataUrl) {
         console.log('[Gallery] Photo selected, dataUrl length:', photo.dataUrl.length)
         setCapturedPhotoDataUrl(photo.dataUrl)
+        
+        // On iOS, auto-upload with current location
+        if (isNative && location) {
+          const file = dataUrlToFile(photo.dataUrl, `photo-${Date.now()}.jpg`)
+          await handleLocationPhotoUpload(file)
+        }
       }
     } catch (error: any) {
       console.error('[Gallery] Selection error:', error)
@@ -1312,6 +1335,24 @@ export default function AppPage() {
   const handleMapClick = (lat: number, lng: number) => {
     setSelectedPhotoLocation({ lat, lng })
     setShowPhotoModal(true)
+  }
+
+  const handleAddPhotoClick = () => {
+    if (isNative) {
+      // On iOS, show action sheet
+      if (typeof window !== 'undefined' && 'confirm' in window) {
+        if (window.confirm('Take a new photo?')) {
+          takeCameraPhoto()
+        } else {
+          selectGalleryPhoto()
+        }
+      } else {
+        takeCameraPhoto()
+      }
+    } else {
+      // On web, show modal with map
+      setShowPhotoModal(true)
+    }
   }
 
   const loadingShell = (
@@ -1861,7 +1902,7 @@ export default function AppPage() {
                     )}
                   </div>
                   <Button
-                    onClick={() => setShowPhotoModal(true)}
+                    onClick={handleAddPhotoClick}
                     className="bg-cyan-500 hover:bg-cyan-600 rounded-xl"
                     size="sm"
                   >
