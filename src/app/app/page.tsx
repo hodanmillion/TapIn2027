@@ -153,6 +153,7 @@ export default function AppPage() {
   const [searchAddress, setSearchAddress] = useState("")
   const [searchedLocation, setSearchedLocation] = useState<{ lat: number; lng: number; name: string; city: string } | null>(null)
   const [isSearching, setIsSearching] = useState(false)
+  const [isLocating, setIsLocating] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -787,6 +788,23 @@ export default function AppPage() {
       setLocationError("Unable to get location. Please enable location services.")
       setLocationPermission("denied")
       setLoadingLocation(false)
+    }
+  }
+
+  const handleLocateMe = async () => {
+    if (isLocating) return
+    
+    setIsLocating(true)
+    setSearchedLocation(null)
+    setSearchAddress("")
+    
+    try {
+      const pos = await getPosition()
+      await applyPosition(pos.coords, user?.id)
+    } catch (err) {
+      console.error('[LocateMe] Failed:', err)
+    } finally {
+      setIsLocating(false)
     }
   }
 
@@ -1747,11 +1765,26 @@ export default function AppPage() {
                 </div>
               </div>
               
-              <Link href="/app/settings" className="flex-shrink-0">
-                <Button variant="ghost" size="icon" className="rounded-xl">
-                  <Settings className="w-5 h-5" />
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="rounded-xl"
+                  onClick={handleLocateMe}
+                  disabled={isLocating}
+                >
+                  {isLocating ? (
+                    <Loader2 className="w-5 h-5 animate-spin text-cyan-400" />
+                  ) : (
+                    <Target className="w-5 h-5 text-cyan-400" />
+                  )}
                 </Button>
-              </Link>
+                <Link href="/app/settings" className="flex-shrink-0">
+                  <Button variant="ghost" size="icon" className="rounded-xl">
+                    <Settings className="w-5 h-5" />
+                  </Button>
+                </Link>
+              </div>
             </div>
           </div>
         </header>
