@@ -1335,8 +1335,8 @@ export default function AppPage() {
   }
 
   const loadingShell = (
-    <div className="min-h-[100dvh] safe-bottom safe-horizontal flex flex-col bg-background">
-      <header className="sticky top-0 z-50 glass border-b border-border/50 safe-top safe-horizontal backdrop-blur-xl">
+    <div className="min-h-[100dvh] safe-inset flex flex-col bg-background">
+      <header className="sticky top-0 z-50 glass border-b border-border/50 backdrop-blur-xl">
         <div className="max-w-4xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -1375,7 +1375,7 @@ export default function AppPage() {
         </div>
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 glass border-t border-border/50 z-50 safe-bottom safe-horizontal">
+      <nav className="fixed bottom-0 left-0 right-0 glass border-t border-t-border/50 z-50 safe-bottom safe-horizontal">
         <div className="max-w-4xl mx-auto px-4 py-2 flex items-center justify-around">
           <div className="flex flex-col items-center gap-1 py-2 px-6">
             <MapPin className="w-6 h-6 text-cyan-400" />
@@ -1466,9 +1466,9 @@ export default function AppPage() {
     return (
       <>
         <OfflineBanner />
-        <div className="min-h-[100dvh] safe-bottom safe-horizontal grid grid-rows-[auto_1fr_auto] bg-gradient-to-b from-slate-950 via-slate-900 to-black text-white">
+        <div className="min-h-[100dvh] safe-inset grid grid-rows-[auto_1fr_auto] bg-gradient-to-b from-slate-950 via-slate-900 to-black text-white">
           <header 
-            className="sticky top-0 z-50 glass border-b border-border/50 safe-top safe-horizontal"
+            className="sticky top-0 z-50 glass border-b border-border/50"
           >
             <div className="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
               <button
@@ -1576,7 +1576,7 @@ export default function AppPage() {
           </div>
 
           {isInProximityChat ? (
-            <div className="p-4 glass border-t border-border/50 flex-shrink-0 safe-bottom safe-horizontal">
+            <div className="p-4 glass border-t border-border/50 flex-shrink-0">
               <div className="max-w-4xl mx-auto">
                 {imageError && (
                   <div className="mb-3 text-sm text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 w-fit">
@@ -1695,7 +1695,7 @@ export default function AppPage() {
               </div>
             </div>
           ) : (
-            <div className="p-4 glass border-t border-border/50 flex-shrink-0 safe-bottom safe-horizontal">
+            <div className="p-4 glass border-t border-border/50 flex-shrink-0">
               <div className="max-w-4xl mx-auto text-center">
                 <div className="flex items-center justify-center gap-2 text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl py-3 px-4">
                   <Info className="w-5 h-5" />
@@ -1712,8 +1712,8 @@ export default function AppPage() {
   return (
     <>
       <OfflineBanner />
-      <div className="min-h-[100dvh] safe-bottom safe-horizontal flex flex-col bg-background">
-        <header className="sticky top-0 z-50 glass border-b border-border/50 safe-top safe-horizontal backdrop-blur-xl">
+      <div className="min-h-[100dvh] safe-inset flex flex-col bg-background">
+        <header className="sticky top-0 z-50 glass border-b border-border/50 backdrop-blur-xl">
           <div className="max-w-4xl mx-auto px-4 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3 flex-shrink-0">
@@ -2150,7 +2150,7 @@ export default function AppPage() {
             </div>
           )}
 
-          <nav className="fixed bottom-0 left-0 right-0 glass border-t border-border/50 z-50 safe-bottom safe-horizontal">
+          <nav className="fixed bottom-0 left-0 right-0 glass border-t border-t-border/50 z-50 safe-bottom safe-horizontal">
             <div className="max-w-4xl mx-auto px-4 py-2 flex items-center justify-around">
               <div className="flex flex-col items-center gap-1 py-2 px-6">
                 <MapPin className="w-6 h-6 text-cyan-400" />
