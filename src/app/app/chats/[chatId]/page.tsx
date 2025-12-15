@@ -48,6 +48,7 @@ type ChatInfo = {
 
 const QUICK_REACTIONS = ["❤️", "😂", "😮", "😢", "🔥", "👍"]
 const ONLINE_THRESHOLD_MS = 5 * 60 * 1000 // 5 minutes
+const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
 
 const groupReactions = (reactions: Reaction[]) => {
   const grouped: Record<string, string[]> = {}
@@ -323,7 +324,13 @@ export default function ChatPage() {
     if (typeof window === 'undefined') return null
     try {
       const cached = localStorage.getItem(`tapin:chat:${chatId}`)
-      return cached ? JSON.parse(cached) : null
+      if (!cached) return null
+      const parsed = JSON.parse(cached)
+      if (parsed.expiry && Date.now() > parsed.expiry) {
+        localStorage.removeItem(`tapin:chat:${chatId}`)
+        return null
+      }
+      return parsed
     } catch {
       return null
     }
@@ -332,7 +339,8 @@ export default function ChatPage() {
   const setChatCache = useCallback((data: { messages: Message[]; chatInfo: ChatInfo }) => {
     if (typeof window === 'undefined') return
     try {
-      localStorage.setItem(`tapin:chat:${chatId}`, JSON.stringify(data))
+      const cacheData = { ...data, expiry: Date.now() + CACHE_TTL_MS }
+      localStorage.setItem(`tapin:chat:${chatId}`, JSON.stringify(cacheData))
     } catch {}
   }, [chatId])
 
@@ -484,7 +492,7 @@ export default function ChatPage() {
       setMessages([])
     }
     setLoading(false)
-  }, [chatId, user?.id, isOnline, chatInfo])
+  }, [chatId, user?.id, isOnline, chatInfo, fetchReactions, fetchReadReceipts])
 
   const updateReactionsForMessage = useCallback(async (messageId: string) => {
     const reactions = await fetchReactions([messageId])

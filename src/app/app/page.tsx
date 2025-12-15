@@ -96,7 +96,9 @@ type ChatVisit = {
 const PROXIMITY_RADIUS_METERS = 50
 const MIN_MOVEMENT_METERS = 50
 const DEBOUNCE_DELAY = 300
-const LOCATION_UPDATE_INTERVAL = 10000
+const LOCATION_UPDATE_INTERVAL = 30000
+const NEARBY_CACHE_TTL = 5
+const NEARBY_PEOPLE_LIMIT = 100
 
 function debounce<T extends (...args: any[]) => any>(func: T, wait: number): (...args: Parameters<T>) => void {
   let timeout: NodeJS.Timeout | null = null
@@ -297,7 +299,7 @@ export default function AppPage() {
     fetchAbortControllersRef.current.set(fetchKey, controller)
 
     try {
-      const res = await fetch(getApiUrl(`/api/people-nearby?scope=world&limit=200&userId=${userId}${city ? `&city=${encodeURIComponent(city)}` : ""}`), {
+      const res = await fetch(getApiUrl(`/api/people-nearby?scope=world&limit=${NEARBY_PEOPLE_LIMIT}&userId=${userId}${city ? `&city=${encodeURIComponent(city)}` : ""}`), {
         signal: controller.signal,
       })
       
@@ -306,7 +308,7 @@ export default function AppPage() {
       const data = await res.json()
       if (data.people) {
         setNearbyPeople(data.people)
-        cacheSet(cacheKey, data.people, 2)
+        cacheSet(cacheKey, data.people, NEARBY_CACHE_TTL)
       }
     } catch (err: any) {
       if (err.name !== 'AbortError' && !cached) {
@@ -636,6 +638,10 @@ export default function AppPage() {
   const applyPosition = useCallback(async (coords: GeolocationCoordinates, userId?: string) => {
     const { name, city } = await reverseGeocode(coords.latitude, coords.longitude)
     const nextLocation = { lat: coords.latitude, lng: coords.longitude, name, city }
+    
+    const lastLoc = lastKnownLocationRef.current
+    const hasMoved = !lastLoc || getDistanceMeters(lastLoc.lat, lastLoc.lng, coords.latitude, coords.longitude) > MIN_MOVEMENT_METERS
+    
     setLocation(nextLocation)
     cacheLocation(nextLocation)
     setLocationPermission("granted")
@@ -664,18 +670,20 @@ export default function AppPage() {
         }
       }
 
-      const results = await Promise.allSettled([
-        updateUserLocation(id, coords.latitude, coords.longitude, city),
-        autoJoinProximityChat(coords.latitude, coords.longitude, name, id),
-        fetchNearbyPeople(city, id),
-      ])
-      
-      results.forEach((result, index) => {
-        if (result.status === 'rejected') {
-          const labels = ['location update', 'proximity chat', 'nearby people']
-          console.error(`${labels[index]} failed:`, result.reason)
-        }
-      })
+      if (hasMoved) {
+        const results = await Promise.allSettled([
+          updateUserLocation(id, coords.latitude, coords.longitude, city),
+          autoJoinProximityChat(coords.latitude, coords.longitude, name, id),
+          fetchNearbyPeople(city, id),
+        ])
+        
+        results.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            const labels = ['location update', 'proximity chat', 'nearby people']
+            console.error(`${labels[index]} failed:`, result.reason)
+          }
+        })
+      }
     }
   }, [autoJoinProximityChat, fetchNearbyPeople, updateUserLocation, user, proximityChat])
 
@@ -1138,6 +1146,11 @@ export default function AppPage() {
       if (photo.dataUrl) {
         console.log('[Camera] Photo captured, dataUrl length:', photo.dataUrl.length)
         setCapturedPhotoDataUrl(photo.dataUrl)
+        
+        if (location) {
+          setSelectedPhotoLocation({ lat: location.lat, lng: location.lng })
+        }
+        
         setActiveTab("photos")
         
         setTimeout(() => {
@@ -1166,6 +1179,11 @@ export default function AppPage() {
       if (photo.dataUrl) {
         console.log('[Gallery] Photo selected, dataUrl length:', photo.dataUrl.length)
         setCapturedPhotoDataUrl(photo.dataUrl)
+        
+        if (location) {
+          setSelectedPhotoLocation({ lat: location.lat, lng: location.lng })
+        }
+        
         setActiveTab("photos")
         
         setTimeout(() => {
@@ -1924,30 +1942,38 @@ export default function AppPage() {
           </div>
 
           {showPhotoModal && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm safe-inset">
-              <div className="absolute inset-0 z-10">
-                {(searchedLocation || location) && (
-                  <Suspense fallback={
-                    <div className="w-full h-full flex items-center justify-center">
-                      <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
-                    </div>
-                  }>
-                    <HeatMap
-                      people={nearbyPeople}
-                      center={searchedLocation ? [searchedLocation.lat, searchedLocation.lng] : [location!.lat, location!.lng]}
-                      currentUserLocation={location ? [location.lat, location.lng] : undefined}
-                      photos={locationPhotos}
-                      onPhotoClick={handlePhotoClick}
-                      onMapClick={(lat, lng) => {
-                        setSelectedPhotoLocation({ lat, lng })
-                        setImageError("")
-                      }}
-                    />
-                  </Suspense>
-                )}
-              </div>
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm safe-inset" onClick={() => {
+              setShowPhotoModal(false)
+              setPhotoCaption("")
+              setImageError("")
+              setCapturedPhotoDataUrl(null)
+              setSelectedPhotoLocation(null)
+            }}>
+              {!selectedPhotoLocation && !capturedPhotoDataUrl && activeTab !== "map" && (
+                <div className="absolute inset-0 z-10">
+                  {(searchedLocation || location) && (
+                    <Suspense fallback={
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+                      </div>
+                    }>
+                      <HeatMap
+                        people={nearbyPeople}
+                        center={searchedLocation ? [searchedLocation.lat, searchedLocation.lng] : [location!.lat, location!.lng]}
+                        currentUserLocation={location ? [location.lat, location.lng] : undefined}
+                        photos={locationPhotos}
+                        onPhotoClick={handlePhotoClick}
+                        onMapClick={(lat, lng) => {
+                          setSelectedPhotoLocation({ lat, lng })
+                          setImageError("")
+                        }}
+                      />
+                    </Suspense>
+                  )}
+                </div>
+              )}
 
-              <div className="relative z-20 bg-secondary/95 rounded-2xl p-6 max-w-md w-full mx-4 border border-border/50 shadow-2xl">
+              <div className="relative z-20 bg-secondary/95 rounded-2xl p-6 max-w-md w-full mx-4 border border-border/50 shadow-2xl" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-bold">Add Location Photo</h3>
                   <Button

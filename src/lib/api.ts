@@ -6,6 +6,11 @@ export function getApiUrl(path: string): string {
   }
   
   const cleanPath = path.startsWith('/') ? path : `/${path}`
+  
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return cleanPath
+  }
+  
   return `${API_BASE_URL}${cleanPath}`
 }
 

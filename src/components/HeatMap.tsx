@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, useRef } from "react"
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from "react-leaflet"
 import Image from "next/image"
 import L from "leaflet"
@@ -458,11 +458,39 @@ const searchIcon = L.divIcon({
 })
 
 function MapClickHandler({ onClick }: { onClick?: (lat: number, lng: number) => void }) {
+  const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const isDoubleClickRef = useRef(false)
+  
   useMapEvents({
     click(e) {
-      onClick?.(e.latlng.lat, e.latlng.lng)
+      if (!onClick || isDoubleClickRef.current) {
+        isDoubleClickRef.current = false
+        return
+      }
+      
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current)
+        clickTimeoutRef.current = null
+        return
+      }
+      
+      clickTimeoutRef.current = setTimeout(() => {
+        if (!isDoubleClickRef.current) {
+          onClick(e.latlng.lat, e.latlng.lng)
+        }
+        clickTimeoutRef.current = null
+        isDoubleClickRef.current = false
+      }, 300)
     },
+    dblclick() {
+      isDoubleClickRef.current = true
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current)
+        clickTimeoutRef.current = null
+      }
+    }
   })
+  
   return null
 }
 

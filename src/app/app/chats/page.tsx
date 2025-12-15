@@ -27,6 +27,30 @@ type ChatPreview = {
 }
 
 const ONLINE_THRESHOLD_MS = 5 * 60 * 1000
+const CACHE_TTL_MS = 5 * 60 * 1000
+const REFRESH_DEBOUNCE_MS = 2000
+
+const cacheSet = (key: string, value: unknown) => {
+  if (typeof window === "undefined") return
+  const item = { value, expiry: Date.now() + CACHE_TTL_MS }
+  localStorage.setItem(key, JSON.stringify(item))
+}
+
+const cacheGet = <T,>(key: string): T | null => {
+  if (typeof window === "undefined") return null
+  try {
+    const item = localStorage.getItem(key)
+    if (!item) return null
+    const parsed = JSON.parse(item)
+    if (Date.now() > parsed.expiry) {
+      localStorage.removeItem(key)
+      return null
+    }
+    return parsed.value as T
+  } catch {
+    return null
+  }
+}
 
 function ChatsContent() {
   const [user, setUser] = useState<{ id: string } | null>(null)
@@ -51,75 +75,91 @@ function ChatsContent() {
   useEffect(() => {
     if (!user) return
 
-    const privateThreads = threads.filter(t => t.type === "private")
-    
-    if (privateThreads.length === 0) {
-      setChatPreviews([])
-      return
-    }
-
-    const otherUserIds = privateThreads
-      .map(t => t.participant_ids?.find(id => id !== user.id))
-      .filter(Boolean) as string[]
-
-    if (otherUserIds.length === 0) {
-      setChatPreviews([])
-      return
-    }
-
     const buildPreviews = async () => {
+      const cacheKey = `tapin:chat-previews:${user.id}`
+      const cached = cacheGet<ChatPreview[]>(cacheKey)
+      
+      if (cached && !loading) {
+        setChatPreviews(cached)
+      }
+
       try {
-        const profiles = await db.profiles.bulkGet(otherUserIds)
-        const profileMap = new Map(profiles.filter(Boolean).map(p => [p!.id, p]))
-
-        const uncachedIds = otherUserIds.filter(id => !profileMap.has(id))
+        const privateThreads = threads.filter(t => t.type === "private")
         
-        if (uncachedIds.length > 0 && networkStatus === "online") {
-          const { data } = await supabase
-            .from("profiles")
-            .select("id, username, display_name, avatar_url, last_seen_at")
-            .in("id", uncachedIds)
+        if (privateThreads.length === 0) {
+          setChatPreviews([])
+          return
+        }
 
-          if (data) {
+        const otherUserIds = privateThreads
+          .map(t => t.participant_ids?.find(id => id !== user.id))
+          .filter(Boolean) as string[]
+
+        if (otherUserIds.length === 0) {
+          setChatPreviews([])
+          return
+        }
+
+        const buildPreviews = async () => {
+          try {
+            const profiles = await db.profiles.bulkGet(otherUserIds)
+            const profileMap = new Map(profiles.filter(Boolean).map(p => [p!.id, p]))
+
+            const uncachedIds = otherUserIds.filter(id => !profileMap.has(id))
+            
+            if (uncachedIds.length > 0 && networkStatus === "online") {
+              const { data } = await supabase
+                .from("profiles")
+                .select("id, username, display_name, avatar_url, last_seen_at")
+                .in("id", uncachedIds)
+
+              if (data) {
+                const now = Date.now()
+                await db.profiles.bulkPut(data.map(p => ({ ...p, updated_at: now })))
+                data.forEach(profile => profileMap.set(profile.id, profile))
+              }
+            }
+
             const now = Date.now()
-            await db.profiles.bulkPut(data.map(p => ({ ...p, updated_at: now })))
-            data.forEach(profile => profileMap.set(profile.id, profile))
+            const previews: ChatPreview[] = privateThreads
+              .map(thread => {
+                const otherUserId = thread.participant_ids?.find(id => id !== user.id)
+                if (!otherUserId) return null
+
+                const profile = profileMap.get(otherUserId)
+                if (!profile) return null
+
+                const isOnline = profile.last_seen_at 
+                  ? (now - new Date(profile.last_seen_at).getTime()) < ONLINE_THRESHOLD_MS
+                  : false
+
+                return {
+                  id: thread.id,
+                  otherUserId,
+                  otherUsername: profile.username,
+                  otherDisplayName: profile.display_name,
+                  otherAvatarUrl: profile.avatar_url,
+                  otherIsOnline: isOnline,
+                  lastMessageContent: thread.last_message_preview,
+                  lastMessageSenderId: thread.last_message_sender_id,
+                  lastMessageImageUrl: thread.last_message_image_url,
+                  lastMessageAt: thread.last_message_at,
+                }
+              })
+              .filter(Boolean) as ChatPreview[]
+
+            setChatPreviews(previews)
+            cacheSet(cacheKey, previews)
+            
+            previews.forEach(chat => {
+              router.prefetch(`/app/chats/${chat.id}`)
+            })
+          } catch (err) {
+            console.error("[ChatsPage] Error building previews:", err)
           }
         }
 
-        const now = Date.now()
-        const previews: ChatPreview[] = privateThreads
-          .map(thread => {
-            const otherUserId = thread.participant_ids?.find(id => id !== user.id)
-            if (!otherUserId) return null
-
-            const profile = profileMap.get(otherUserId)
-            if (!profile) return null
-
-            const isOnline = profile.last_seen_at 
-              ? (now - new Date(profile.last_seen_at).getTime()) < ONLINE_THRESHOLD_MS
-              : false
-
-            return {
-              id: thread.id,
-              otherUserId,
-              otherUsername: profile.username,
-              otherDisplayName: profile.display_name,
-              otherAvatarUrl: profile.avatar_url,
-              otherIsOnline: isOnline,
-              lastMessageContent: thread.last_message_preview,
-              lastMessageSenderId: thread.last_message_sender_id,
-              lastMessageImageUrl: thread.last_message_image_url,
-              lastMessageAt: thread.last_message_at,
-            }
-          })
-          .filter(Boolean) as ChatPreview[]
-
-        setChatPreviews(previews)
-        
-        previews.forEach(chat => {
-          router.prefetch(`/app/chats/${chat.id}`)
-        })
+        buildPreviews()
       } catch (err) {
         console.error("[ChatsPage] Error building previews:", err)
       }

@@ -40,12 +40,20 @@ type FriendWithProfile = {
 }
 
 const ONLINE_THRESHOLD_MS = 5 * 60 * 1000
+const CACHE_TTL_MS = 5 * 60 * 1000
+const REFRESH_DEBOUNCE_MS = 2000
 
 function loadCache() {
   if (typeof window === "undefined") return null
   try {
     const raw = localStorage.getItem("tapin:friends-cache")
-    return raw ? JSON.parse(raw) : null
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed.expiry && Date.now() > parsed.expiry) {
+      localStorage.removeItem("tapin:friends-cache")
+      return null
+    }
+    return parsed
   } catch {
     return null
   }
@@ -134,16 +142,15 @@ function PeopleContent() {
       }
 
       if (typeof window !== "undefined") {
-        localStorage.setItem(
-          "tapin:friends-cache",
-          JSON.stringify({
-            userId: user.id,
-            friends: friendsResult,
-            pendingRequests: pendingResult,
-            recentTaps: tapsResult,
-            chatNotifications: notificationData,
-          })
-        )
+        const cacheData = {
+          userId: user.id,
+          friends: friendsResult,
+          pendingRequests: pendingResult,
+          recentTaps: tapsResult,
+          chatNotifications: notificationData,
+          expiry: Date.now() + CACHE_TTL_MS
+        }
+        localStorage.setItem("tapin:friends-cache", JSON.stringify(cacheData))
       }
 
       setRefreshing(false)
