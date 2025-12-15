@@ -1146,16 +1146,6 @@ export default function AppPage() {
       if (photo.dataUrl) {
         console.log('[Camera] Photo captured, dataUrl length:', photo.dataUrl.length)
         setCapturedPhotoDataUrl(photo.dataUrl)
-        
-        if (location) {
-          setSelectedPhotoLocation({ lat: location.lat, lng: location.lng })
-        }
-        
-        setActiveTab("photos")
-        
-        setTimeout(() => {
-          setShowPhotoModal(true)
-        }, 100)
       }
     } catch (error: any) {
       console.error('[Camera] Capture error:', error)
@@ -1179,16 +1169,6 @@ export default function AppPage() {
       if (photo.dataUrl) {
         console.log('[Gallery] Photo selected, dataUrl length:', photo.dataUrl.length)
         setCapturedPhotoDataUrl(photo.dataUrl)
-        
-        if (location) {
-          setSelectedPhotoLocation({ lat: location.lat, lng: location.lng })
-        }
-        
-        setActiveTab("photos")
-        
-        setTimeout(() => {
-          setShowPhotoModal(true)
-        }, 100)
       }
     } catch (error: any) {
       console.error('[Gallery] Selection error:', error)
@@ -1788,7 +1768,6 @@ export default function AppPage() {
                         currentUserLocation={location ? [location.lat, location.lng] : undefined}
                         photos={locationPhotos}
                         onPhotoClick={handlePhotoClick}
-                        onMapClick={handleMapClick}
                       />
                     </Suspense>
                   )}
@@ -1949,7 +1928,7 @@ export default function AppPage() {
               setCapturedPhotoDataUrl(null)
               setSelectedPhotoLocation(null)
             }}>
-              {!selectedPhotoLocation && !capturedPhotoDataUrl && activeTab !== "map" && (
+              {!selectedPhotoLocation && !capturedPhotoDataUrl && (
                 <div className="absolute inset-0 z-10">
                   {(searchedLocation || location) && (
                     <Suspense fallback={
@@ -2054,28 +2033,35 @@ export default function AppPage() {
                   />
 
                   {!capturedPhotoDataUrl ? (
-                    <div className="grid grid-cols-2 gap-3">
-                      <Button
-                        onClick={async () => {
-                          await takeCameraPhoto()
-                        }}
-                        disabled={uploadingLocationPhoto}
-                        className="bg-cyan-500 hover:bg-cyan-600 rounded-xl h-12 flex flex-col gap-1"
-                      >
-                        <Sparkles className="w-5 h-5" />
-                        <span className="text-xs">Take Photo</span>
-                      </Button>
-                      <Button
-                        onClick={async () => {
-                          await selectGalleryPhoto()
-                        }}
-                        disabled={uploadingLocationPhoto}
-                        className="bg-purple-500 hover:bg-purple-600 rounded-xl h-12 flex flex-col gap-1"
-                      >
-                        <Image className="w-5 h-5" />
-                        <span className="text-xs">From Gallery</span>
-                      </Button>
-                    </div>
+                    <>
+                      {!selectedPhotoLocation && (
+                        <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-xl p-3 text-xs text-cyan-200 mb-3">
+                          ℹ️ Select a location on the map first, then choose your photo
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-3">
+                        <Button
+                          onClick={async () => {
+                            await takeCameraPhoto()
+                          }}
+                          disabled={uploadingLocationPhoto || !selectedPhotoLocation}
+                          className="bg-cyan-500 hover:bg-cyan-600 rounded-xl h-12 flex flex-col gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <Sparkles className="w-5 h-5" />
+                          <span className="text-xs">Take Photo</span>
+                        </Button>
+                        <Button
+                          onClick={async () => {
+                            await selectGalleryPhoto()
+                          }}
+                          disabled={uploadingLocationPhoto || !selectedPhotoLocation}
+                          className="bg-purple-500 hover:bg-purple-600 rounded-xl h-12 flex flex-col gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <Image className="w-5 h-5" />
+                          <span className="text-xs">From Gallery</span>
+                        </Button>
+                      </div>
+                    </>
                   ) : (
                     <div className="grid grid-cols-2 gap-3">
                       <Button
