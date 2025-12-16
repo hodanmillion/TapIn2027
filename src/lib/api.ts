@@ -8,11 +8,12 @@ export function getApiUrl(path: string): string {
   
   const cleanPath = path.startsWith('/') ? path : `/${path}`
   
-  // Detect local development environment
+  // Detect runtime environment (web vs Capacitor native)
   if (typeof window !== 'undefined') {
     const hostname = window.location.hostname
+    const isCapacitorNative = window.location.protocol === 'capacitor:' || Boolean((window as any).Capacitor?.isNativePlatform?.())
     
-    // Check if running on localhost or private network
+    // Check if running on localhost or private network (web dev)
     const isLocalDev = 
       hostname === 'localhost' ||
       hostname === '127.0.0.1' ||
@@ -25,9 +26,15 @@ export function getApiUrl(path: string): string {
       /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
       // 172.16.x.x - 172.31.x.x range
       /^172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)
-    
-    const finalUrl = isLocalDev ? cleanPath : `${API_BASE_URL}${cleanPath}`
-    console.log(`[getApiUrl] hostname:${hostname} isLocalDev:${isLocalDev} path:${cleanPath} => ${finalUrl}`)
+
+    // On native (Capacitor), always use absolute API URL even though hostname is localhost
+    const finalUrl = isCapacitorNative
+      ? `${API_BASE_URL}${cleanPath}`
+      : isLocalDev
+        ? cleanPath
+        : `${API_BASE_URL}${cleanPath}`
+
+    console.log(`[getApiUrl] hostname:${hostname} protocol:${window.location.protocol} isCapacitorNative:${isCapacitorNative} isLocalDev:${isLocalDev} path:${cleanPath} => ${finalUrl}`)
     return finalUrl
   }
   
