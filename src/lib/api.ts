@@ -7,9 +7,27 @@ export function getApiUrl(path: string): string {
   
   const cleanPath = path.startsWith('/') ? path : `/${path}`
   
-  // Use localhost for local dev, production for everything else
-  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-    return cleanPath
+  // Detect local development environment
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname
+    
+    // Check if running on localhost or private network
+    const isLocalDev = 
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname.endsWith('.local') ||
+      // 127.x.x.x range
+      /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      // 192.168.x.x range
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      // 10.x.x.x range
+      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      // 172.16.x.x - 172.31.x.x range
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)
+    
+    if (isLocalDev) {
+      return cleanPath
+    }
   }
   
   return `${API_BASE_URL}${cleanPath}`

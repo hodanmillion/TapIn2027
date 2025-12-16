@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { VisualEditsMessenger } from "orchids-visual-edits";
 import { Toaster } from "@/components/ui/sonner"
+import Script from "next/script"
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -52,6 +53,44 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <Script id="cache-version" strategy="beforeInteractive">
+          {`
+            (function() {
+              const BUILD = "${process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.NEXT_PUBLIC_BUILD_ID || "dev"}";
+              const KEY = "tapin:build";
+              
+              if (typeof window === "undefined") return;
+              
+              const prev = localStorage.getItem(KEY);
+              
+              if (!prev) {
+                localStorage.setItem(KEY, BUILD);
+                return;
+              }
+              
+              if (prev !== BUILD) {
+                const toDelete = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                  const k = localStorage.key(i);
+                  if (!k) continue;
+                  
+                  if (
+                    k.startsWith("tapin:") ||
+                    k.includes("cached_location") ||
+                    k.includes("cached_chats") ||
+                    k.includes("history")
+                  ) {
+                    toDelete.push(k);
+                  }
+                }
+                toDelete.forEach((k) => localStorage.removeItem(k));
+                localStorage.setItem(KEY, BUILD);
+                
+                window.location.reload();
+              }
+            })();
+          `}
+        </Script>
         {children}
         <Toaster richColors position="top-center" closeButton />
         <VisualEditsMessenger />

@@ -20,6 +20,7 @@ import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 import { OfflineBanner } from "@/components/OfflineBanner"
 import { startOutboxProcessor } from "@/lib/sync"
 import { getApiUrl } from "@/lib/api"
+import { safeLocationLabel } from "@/lib/location-privacy"
 import {
   MapPin,
   Send,
@@ -1305,23 +1306,13 @@ export default function AppPage() {
   }
 
   const getDisplayableChatName = (chatName: string | null, fallbackName: string | null): string => {
-    if (!chatName) {
-      return fallbackName || lastKnownAddress || 'Location'
-    }
-    
-    // Check if it looks like coordinates (e.g., "45.23,-75.73" or "Location 45.23,75.73")
-    const coordPattern = /^(Location\s+)?[-+]?\d+\.?\d*\s*,\s*[-+]?\d+\.?\d*$/i
-    if (coordPattern.test(chatName.trim())) {
-      return fallbackName || lastKnownAddress || 'Current Location'
-    }
-    
-    // Filter out generic/placeholder names
-    const genericNames = ['My Location', 'Unknown', 'Locating...']
-    if (genericNames.includes(chatName)) {
-      return fallbackName || lastKnownAddress || 'Current Location'
-    }
-    
-    return chatName
+    return safeLocationLabel({
+      name: chatName,
+      address: fallbackName,
+      city: null,
+      lat: null,
+      lng: null,
+    })
   }
 
   const filteredHistory = useMemo(() => {
@@ -1760,7 +1751,14 @@ export default function AppPage() {
                   <MapPin className="w-6 h-6 text-cyan-400" />
                 </div>
                 <div className="flex flex-col min-w-0">
-                  <h1 className="font-bold text-lg truncate">{searchedLocation ? searchedLocation.name : (location?.name || 'Nearby')}</h1>
+                  <h1 className="font-bold text-lg truncate">
+                    {safeLocationLabel({
+                      name: searchedLocation ? searchedLocation.name : (location?.name || null),
+                      city: searchedLocation ? searchedLocation.city : (location?.city || null),
+                      lat: null,
+                      lng: null,
+                    })}
+                  </h1>
                   <p className="text-xs text-muted-foreground whitespace-nowrap">{nearbyPeople.length} people around you</p>
                 </div>
               </div>

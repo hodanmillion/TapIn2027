@@ -36,6 +36,13 @@
 	<string>TapIn needs permission to save photos to your library.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>TapIn needs access to your camera to take photos for sharing.</string>
+	<key>UIRequiresPersistentWiFi</key>
+	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
