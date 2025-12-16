@@ -222,6 +222,20 @@ export default function AppPage() {
   const platform = Capacitor.getPlatform()
   const isNative = platform !== "web"
 
+  const logLocation = useCallback(
+    (message: string, data?: unknown) => {
+      console.log(
+        `[LocationDebug][${isNative ? "native" : "web"}][online:${(networkStatus as any).isOnline ?? networkStatus.status}] ${message}`,
+        data ?? ""
+      )
+    },
+    [isNative, networkStatus]
+  )
+
+  useEffect(() => {
+    logLocation("networkStatus:update", { status: (networkStatus as any).status ?? (networkStatus as any).isOnline, connectionType: (networkStatus as any).connectionType })
+  }, [networkStatus, logLocation])
+
   const cacheLocation = (value: { lat: number; lng: number; name: string; city: string }) => {
     if (typeof window === "undefined") return
     localStorage.setItem("tapin:lastLocation", JSON.stringify(value))
@@ -341,18 +355,22 @@ export default function AppPage() {
     fetchAbortControllersRef.current.set(fetchKey, controller)
 
     try {
-      const res = await fetch(getApiUrl(`/api/people-nearby?scope=world&limit=${NEARBY_PEOPLE_LIMIT}&userId=${userId}${city ? `&city=${encodeURIComponent(city)}` : ""}`), {
+      const url = getApiUrl(`/api/people-nearby?scope=world&limit=${NEARBY_PEOPLE_LIMIT}&userId=${userId}${city ? `&city=${encodeURIComponent(city)}` : ""}`)
+      logLocation("fetchNearbyPeople:start", { url, city, userId, cached: Boolean(cached) })
+      const res = await fetch(url, {
         signal: controller.signal,
       })
       
-      if (!res.ok) throw new Error('Failed to fetch')
+      if (!res.ok) throw new Error(`Failed to fetch nearby (status ${res.status})`)
       
       const data = await res.json()
+      logLocation("fetchNearbyPeople:success", { count: data.people?.length })
       if (data.people) {
         setNearbyPeople(data.people)
         cacheSet(cacheKey, data.people, NEARBY_CACHE_TTL)
       }
     } catch (err: any) {
+      logLocation("fetchNearbyPeople:error", { message: err?.message })
       if (err.name !== 'AbortError' && !cached) {
         setNetworkError("Could not refresh nearby people. Check connection.")
       }
@@ -360,15 +378,17 @@ export default function AppPage() {
       fetchNearbyInProgressRef.current = false
       fetchAbortControllersRef.current.delete(fetchKey)
     }
-  }, [])
+  }, [logLocation])
 
   const updateUserLocation = useCallback(async (userId: string, lat: number, lng: number, city: string) => {
     const now = Date.now()
     if (now - lastLocationUpdateRef.current < LOCATION_UPDATE_INTERVAL) {
+      logLocation("updateUserLocation:skip:rateLimit", { deltaMs: now - lastLocationUpdateRef.current })
       return
     }
 
     if (updateLocationInProgressRef.current) {
+      logLocation("updateUserLocation:skip:inProgress")
       return
     }
 
@@ -385,13 +405,17 @@ export default function AppPage() {
     fetchAbortControllersRef.current.set(fetchKey, controller)
 
     try {
-      await fetch(getApiUrl("/api/people-nearby"), {
+      const body = { userId, latitude: lat, longitude: lng, city }
+      logLocation("updateUserLocation:start", body)
+      const res = await fetch(getApiUrl("/api/people-nearby"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, latitude: lat, longitude: lng, city }),
+        body: JSON.stringify(body),
         signal: controller.signal,
       })
+      logLocation("updateUserLocation:response", { status: res.status, ok: res.ok })
     } catch (err: any) {
+      logLocation("updateUserLocation:error", { message: err?.message })
       if (err.name !== 'AbortError') {
         setNetworkError("Location update failed. Reconnecting...")
       }
@@ -399,7 +423,7 @@ export default function AppPage() {
       updateLocationInProgressRef.current = false
       fetchAbortControllersRef.current.delete(fetchKey)
     }
-  }, [])
+  }, [logLocation])
 
   const sendPresenceHeartbeat = useCallback(async (userId: string) => {
     if (!networkStatus.isOnline) return
@@ -526,6 +550,7 @@ export default function AppPage() {
        const timeoutId = setTimeout(() => controller.abort(), 8000)
        
        try {
+         logLocation("autoJoinProximityChat:start", { lat: roundedLat, lng: roundedLng, finalLocationName })
          const res = await fetch(getApiUrl("/api/location-chat"), {
            method: "POST",
            headers: { "Content-Type": "application/json" },
@@ -539,11 +564,13 @@ export default function AppPage() {
          })
          
          clearTimeout(timeoutId)
+         logLocation("autoJoinProximityChat:response", { status: res.status, ok: res.ok })
          
          if (!res.ok) return
          
          const data = await res.json()
          if (data.chat) {
+           logLocation("autoJoinProximityChat:joined", { chatId: data.chat.id })
            setProximityChat(data.chat)
            if (userId) {
              fetch(getApiUrl("/api/chat-history"), {
@@ -562,6 +589,7 @@ export default function AppPage() {
        } catch (fetchErr: any) {
          clearTimeout(timeoutId)
          if (fetchErr.name === 'AbortError' || fetchErr.message?.includes('Failed to fetch')) {
+           logLocation("autoJoinProximityChat:abortedOrOffline", { message: fetchErr.message })
            return
          }
          throw fetchErr
@@ -569,11 +597,12 @@ export default function AppPage() {
      } catch (err: any) {
        if (err.name !== 'AbortError' && !err.message?.includes('Failed to fetch')) {
          console.error('[AutoJoin] Unexpected error:', err.message)
+         logLocation("autoJoinProximityChat:error", { message: err.message })
        }
      } finally {
        autoJoinInProgressRef.current = false
      }
-   }, [fetchHistory, lastKnownAddress])
+   }, [fetchHistory, lastKnownAddress, logLocation])
 
   const fetchMessages = useCallback(async (chatId: string, userId?: string) => {
      if (!userId) {
@@ -618,6 +647,7 @@ export default function AppPage() {
    }, [cacheGet, cacheSet])
 
   const reverseGeocode = async (lat: number, lng: number): Promise<{ name: string; city: string }> => {
+    logLocation("reverseGeocode:start", { lat, lng })
     if (geocodeInProgressRef.current) {
       await new Promise(resolve => setTimeout(resolve, 500))
     }
@@ -634,20 +664,24 @@ export default function AppPage() {
       })
       
       clearTimeout(timeoutId)
+      logLocation("reverseGeocode:response", { status: res.status, ok: res.ok })
       
       if (res.ok) {
         const data = await res.json()
         if (data.name && data.city) {
           setLastKnownAddress(data.name)
+          logLocation("reverseGeocode:success", data)
           return { name: data.name, city: data.city }
         }
         
         if (data.city && lastKnownAddress) {
+          logLocation("reverseGeocode:cityOnly", data)
           return { name: lastKnownAddress, city: data.city }
         }
       }
     } catch (err) {
       if (err instanceof Error && err.name !== 'AbortError') {
+        logLocation("reverseGeocode:error", { message: err.message })
         console.error("Geocoding error:", err)
       }
     } finally {
@@ -655,6 +689,7 @@ export default function AppPage() {
     }
     
     const fallbackCity = getFallbackCityName(lat, lng)
+    logLocation("reverseGeocode:fallback", { fallbackCity, lastKnownAddress })
     
     if (lastKnownAddress && lastKnownAddress !== "Locating...") {
       return { name: lastKnownAddress, city: fallbackCity }
@@ -690,11 +725,18 @@ export default function AppPage() {
   }
 
   const applyPosition = useCallback(async (coords: GeolocationCoordinates, userId?: string) => {
+    logLocation("applyPosition:start", {
+      lat: coords.latitude,
+      lng: coords.longitude,
+      accuracy: coords.accuracy,
+      userId: userId || user?.id,
+    })
     const { name, city } = await reverseGeocode(coords.latitude, coords.longitude)
     const nextLocation = { lat: coords.latitude, lng: coords.longitude, name, city }
     
     const lastLoc = lastKnownLocationRef.current
     const hasMoved = !lastLoc || getDistanceMeters(lastLoc.lat, lastLoc.lng, coords.latitude, coords.longitude) > MIN_MOVEMENT_METERS
+    logLocation("applyPosition:computed", { hasMoved, lastLoc, nextLocation })
     
     setLocation(nextLocation)
     cacheLocation(nextLocation)
@@ -709,8 +751,10 @@ export default function AppPage() {
         const chatLat = parseFloat(proximityChat.latitude)
         const chatLng = parseFloat(proximityChat.longitude)
         const distanceFromChat = getDistanceMeters(coords.latitude, coords.longitude, chatLat, chatLng)
+        logLocation("applyPosition:distanceFromChat", { distanceFromChat, chatId: proximityChat.id })
         
         if (distanceFromChat > PROXIMITY_RADIUS_METERS) {
+          logLocation("applyPosition:leavingChat", { chatId: proximityChat.id })
           await fetch(getApiUrl("/api/chat-history"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -735,51 +779,89 @@ export default function AppPage() {
         if (result.status === 'rejected') {
           const labels = ['location update', 'proximity chat', 'nearby people']
           console.error(`${labels[index]} failed:`, result.reason)
+          logLocation("applyPosition:taskFailed", { label: labels[index], reason: result.reason })
         }
       })
+      logLocation("applyPosition:done", { tasks: results.map((r) => r.status) })
     }
-  }, [autoJoinProximityChat, fetchNearbyPeople, updateUserLocation, user, proximityChat])
+  }, [autoJoinProximityChat, fetchNearbyPeople, updateUserLocation, user, proximityChat, logLocation])
 
   const getPosition = useCallback(async () => {
-    if (isNative) {
-      const status = await Geolocation.checkPermissions()
-      if (status.location !== "granted") {
-        const requested = await Geolocation.requestPermissions({ permissions: ["location"] })
-        if (requested.location !== "granted") {
+    logLocation("getPosition:start", {
+      isNative,
+      platform,
+      secureContext: typeof window !== "undefined" ? window.isSecureContext : "n/a",
+    })
+
+    try {
+      if (isNative) {
+        const status = await Geolocation.checkPermissions()
+        logLocation("getPosition:permissions", status)
+        if (status.location !== "granted") {
+          const requested = await Geolocation.requestPermissions({ permissions: ["location"] })
+          logLocation("getPosition:requestPermissions", requested)
+          if (requested.location !== "granted") {
+            const error = new Error("denied")
+            // @ts-expect-error
+            error.code = 1
+            throw error
+          }
+        }
+        const position = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 })
+        logLocation("getPosition:success:native", {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          timestamp: position.timestamp,
+        })
+        return position
+      }
+
+      if (typeof window !== "undefined" && !window.isSecureContext) {
+        throw new Error("insecure")
+      }
+
+      return await new Promise<GeolocationPosition>((resolve, reject) => {
+        if (!("geolocation" in navigator)) {
           const error = new Error("denied")
           // @ts-expect-error
           error.code = 1
-          throw error
+          reject(error)
+          return
         }
-      }
-      const position = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 })
-      return position
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            logLocation("getPosition:success:web", {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: pos.coords.accuracy,
+              timestamp: pos.timestamp,
+            })
+            resolve(pos)
+          },
+          (err) => {
+            logLocation("getPosition:error:web", { code: err.code, message: err.message })
+            reject(err)
+          },
+          { enableHighAccuracy: true, timeout: 10000 }
+        )
+      })
+    } catch (err: any) {
+      logLocation("getPosition:error", { code: err?.code, message: err?.message })
+      throw err
     }
-
-    if (typeof window !== "undefined" && !window.isSecureContext) {
-      throw new Error("insecure")
-    }
-
-    return new Promise<GeolocationPosition>((resolve, reject) => {
-      if (!("geolocation" in navigator)) {
-        const error = new Error("denied")
-        // @ts-expect-error
-        error.code = 1
-        reject(error)
-        return
-      }
-      navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000 })
-    })
-  }, [isNative])
+  }, [isNative, logLocation, platform])
 
   const requestLocationPermission = async () => {
     setLocationError("")
     setLocationPermission("checking")
     setLoadingLocation(true)
+    logLocation("requestLocationPermission:start", { isNative })
     
     try {
       if (isNative) {
         const requested = await Geolocation.requestPermissions({ permissions: ["location"] })
+        logLocation("requestLocationPermission:nativeResult", requested)
         if (requested.location !== "granted") {
           setLocationError("Location permission denied. Please enable in settings.")
           setLocationPermission("denied")
@@ -794,13 +876,16 @@ export default function AppPage() {
           setLocationError("Location requires HTTPS. Using cached location.")
           setLocationPermission("denied")
           setLoadingLocation(false)
+          logLocation("requestLocationPermission:insecureContext")
           return
         }
 
         const pos = await getPosition()
         await applyPosition(pos.coords)
       }
+      logLocation("requestLocationPermission:success")
     } catch (err: any) {
+      logLocation("requestLocationPermission:error", { code: err?.code, message: err?.message })
       console.error('[Location] Request failed:', err)
       let errorMessage = "Unable to access location. "
       if (err.code === 1) {
@@ -821,11 +906,14 @@ export default function AppPage() {
   const useDefaultLocation = async () => {
     setLocationError("")
     setLoadingLocation(true)
+    logLocation("useDefaultLocation:start")
     
     try {
       const pos = await getPosition()
       await applyPosition(pos.coords)
+      logLocation("useDefaultLocation:success")
     } catch (err) {
+      logLocation("useDefaultLocation:error", err)
       setLocationError("Unable to get location. Please enable location services.")
       setLocationPermission("denied")
       setLoadingLocation(false)
@@ -838,11 +926,14 @@ export default function AppPage() {
     setIsLocating(true)
     setSearchedLocation(null)
     setSearchAddress("")
+    logLocation("handleLocateMe:start")
     
     try {
       const pos = await getPosition()
       await applyPosition(pos.coords, user?.id)
+      logLocation("handleLocateMe:success", { lat: pos.coords.latitude, lng: pos.coords.longitude })
     } catch (err) {
+      logLocation("handleLocateMe:error", err)
       console.error('[LocateMe] Failed:', err)
     } finally {
       setIsLocating(false)
@@ -851,6 +942,7 @@ export default function AppPage() {
 
   useEffect(() => {
     const initOnce = async () => {
+      logLocation("init:start")
       const { data: { user: authUser } } = await supabase.auth.getUser()
       if (!authUser) {
         router.push("/login")
@@ -863,7 +955,7 @@ export default function AppPage() {
       if (cachedLocStr) {
         try {
           cachedLoc = JSON.parse(cachedLocStr)
-          console.log('[Init] Using cached location:', cachedLoc)
+          logLocation('[Init] Using cached location', cachedLoc)
         } catch (err) {
           console.error('[Init] Failed to parse cached location:', err)
         }
@@ -877,7 +969,7 @@ export default function AppPage() {
         setLocationPermission("granted")
         setLoadingLocation(false)
         
-        console.log('[Init] Starting async operations with cached location')
+        logLocation('[Init] Starting async operations with cached location')
         Promise.all([
           fetchHistory(authUser.id),
           fetchNearbyPeople(cachedLoc.city, authUser.id),
@@ -889,11 +981,13 @@ export default function AppPage() {
       if (isNative) {
         try {
           const status = await Geolocation.checkPermissions()
+          logLocation('[Init] Native permission', status)
           if (status.location === "granted") {
             try {
               const position = await getPosition()
               await applyPosition(position.coords, authUser.id)
             } catch (posErr) {
+              logLocation('[Init] Native GPS error', posErr)
               console.error('[Init] Native GPS error:', posErr)
             }
           } else if (!cachedLoc) {
@@ -901,6 +995,7 @@ export default function AppPage() {
             setLoadingLocation(false)
           }
         } catch (err) {
+          logLocation('[Init] Native location error', err)
           console.error('[Init] Native location error:', err)
           if (!cachedLoc) {
             setLocationPermission("prompt")
@@ -913,18 +1008,20 @@ export default function AppPage() {
       if ("permissions" in navigator) {
         try {
           const permission = await navigator.permissions.query({ name: "geolocation" })
+          logLocation('[Init] Web permission', { state: permission.state })
           if (permission.state === "granted") {
             try {
               const position = await getPosition()
               await applyPosition(position.coords, authUser.id)
             } catch (gpsErr) {
-              console.log('[Init] GPS unavailable, using cached location')
+              logLocation('[Init] GPS unavailable, using cached location', gpsErr)
             }
           } else if (!cachedLoc) {
             setLocationPermission("prompt")
             setLoadingLocation(false)
           }
         } catch (err) {
+          logLocation('[Init] Permission query error', err)
           console.error('[Init] Permission query error:', err)
           if (!cachedLoc) {
             setLocationPermission("prompt")
@@ -946,30 +1043,35 @@ export default function AppPage() {
 
     const startWatching = async () => {
       try {
-        if (isNative) {
-          watchId = await Geolocation.watchPosition(
-            { enableHighAccuracy: true },
-            (position) => {
-              if (position) {
-                applyPosition(position.coords, user.id)
+          if (isNative) {
+            watchId = await Geolocation.watchPosition(
+              { enableHighAccuracy: true },
+              (position) => {
+                if (position) {
+                  logLocation("watchPosition:native", { lat: position.coords.latitude, lng: position.coords.longitude })
+                  applyPosition(position.coords, user.id)
+                }
               }
-            }
-          )
-        } else if ("geolocation" in navigator) {
-          watchId = navigator.geolocation.watchPosition(
-            (position) => {
-              applyPosition(position.coords, user.id)
-            },
-            (error) => {
-              console.error('[Location] Watch error:', error.message)
-            },
-            { enableHighAccuracy: true, maximumAge: 30000, timeout: 27000 }
-          )
+            )
+          } else if ("geolocation" in navigator) {
+            watchId = navigator.geolocation.watchPosition(
+              (position) => {
+                logLocation("watchPosition:web", { lat: position.coords.latitude, lng: position.coords.longitude })
+                applyPosition(position.coords, user.id)
+              },
+              (error) => {
+                logLocation("watchPosition:error", { code: error.code, message: error.message })
+                console.error('[Location] Watch error:', error.message)
+              },
+              { enableHighAccuracy: true, maximumAge: 30000, timeout: 27000 }
+            )
+          }
+        } catch (err) {
+          logLocation("watchPosition:setupFailed", err)
+          console.error('[Location] Watch setup failed:', err)
         }
-      } catch (err) {
-        console.error('[Location] Watch setup failed:', err)
       }
-    }
+
 
     startWatching()
 
