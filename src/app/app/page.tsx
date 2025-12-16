@@ -126,6 +126,34 @@ function getDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: numbe
   return R * c
 }
 
+function getDateSeparator(currentDate: string, nextDate?: string): string | null {
+  const current = new Date(currentDate)
+  const next = nextDate ? new Date(nextDate) : null
+  
+  if (!next || current.toDateString() !== next.toDateString()) {
+    const today = new Date()
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+    
+    if (current.toDateString() === today.toDateString()) {
+      return 'Today'
+    } else if (current.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday'
+    } else {
+      const month = current.toLocaleString('default', { month: 'short' })
+      const day = current.getDate()
+      return `${day} ${month}`
+    }
+  }
+  
+  return null
+}
+
+function formatMessageTime(dateStr: string): string {
+  const date = new Date(dateStr)
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+}
+
 export default function AppPage() {
   const [user, setUser] = useState<{ id: string } | null>(null)
   const [location, setLocation] = useState<{ lat: number; lng: number; name: string; city: string } | null>(null)
@@ -1115,16 +1143,6 @@ export default function AppPage() {
     }
   }
 
-  const formatTime = (date: string) => {
-    const d = new Date(date)
-    const now = new Date()
-    const diff = now.getTime() - d.getTime()
-    const hours = Math.floor(diff / (1000 * 60 * 60))
-    if (hours < 1) return "Just now"
-    if (hours < 24) return `${hours}h ago`
-    return `${Math.floor(hours / 24)}d ago`
-  }
-
   const handleImageUpload = async (file?: File) => {
     if (!selectedChat || !user || !file) return
         
@@ -1754,72 +1772,80 @@ export default function AppPage() {
                   <p className="text-sm mt-1">Say hello!</p>
                 </div>
               )}
-              {messages.map((msg) => {
+              {messages.map((msg, index) => {
                 const isOwn = msg.user_id === user?.id
                 const isGif = msg.content?.includes("tenor.com") || msg.content?.includes("giphy.com") || msg.content?.match(/\.(gif|webp)(\?|$)/i)
                 const isImage = msg.content?.startsWith("data:image") || msg.content?.match(/\.(png|jpe?g|webp|heic|bmp)(\?|$)/i)
                 const isPending = msg.status === "pending"
                 const isFailed = msg.status === "failed"
+                const nextMsg = messages[index + 1]
+                const dateSeparator = getDateSeparator(msg.created_at, nextMsg?.created_at)
                 
                 return (
-                  <div
-                    key={msg.client_id || msg.id}
-                    className={`flex gap-3 ${isOwn ? "flex-row-reverse" : ""}`}
-                  >
-                    <Avatar className="w-9 h-9 flex-shrink-0">
-                      <AvatarImage src={msg.user?.avatar_url || ""} />
-                      <AvatarFallback className="bg-cyan-500/20 text-cyan-400 text-sm">
-                        {msg.user?.username?.[0]?.toUpperCase() || "?"}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className={`max-w-[75%] ${isOwn ? "items-end" : "items-start"} flex flex-col`}>
-                      <div className={`flex items-center gap-2 mb-1 ${isOwn ? "flex-row-reverse" : ""}`}>
-                        <span className="text-xs font-medium text-muted-foreground">
-                          {isOwn ? "You" : msg.user?.display_name || msg.user?.username}
-                        </span>
-                        <span className="text-xs text-muted-foreground/50">
-                          {formatTime(msg.created_at)}
-                        </span>
-                        {isPending && (
-                          <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
-                        )}
-                        {isFailed && (
-                          <AlertCircle className="w-3 h-3 text-rose-400" />
-                        )}
+                  <div key={msg.client_id || msg.id}>
+                    {dateSeparator && (
+                      <div className="flex justify-center my-4">
+                        <div className="px-3 py-1.5 bg-secondary/60 rounded-full text-xs font-medium text-muted-foreground">
+                          {dateSeparator}
+                        </div>
                       </div>
-                      <div
-                        className={`rounded-2xl ${
-                          isGif || isImage
-                            ? "p-1 bg-transparent"
-                            : `px-4 py-2.5 ${
-                                isOwn
-                                  ? isFailed
-                                    ? "bg-rose-500/20 text-white rounded-tr-sm border border-rose-500/40"
-                                    : "bg-cyan-500 text-white rounded-tr-sm"
-                                  : "bg-secondary/80 rounded-tl-sm"
-                              }`
-                        } ${isPending ? "opacity-70" : ""}`}
-                      >
-                        {isGif || isImage ? (
-                          <img
-                            src={msg.content}
-                            alt="Message"
-                            className="rounded-xl max-w-full max-h-[220px] object-contain"
-                          />
-                        ) : (
-                          <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
-                        )}
-                      </div>
-                      {isFailed && isOwn && msg.client_id && (
-                        <Button
-                          onClick={() => retryMessage(msg.client_id!)}
-                          variant="ghost"
-                          size="sm"
-                          className="mt-1 text-xs text-rose-400 hover:text-rose-300 h-auto py-1 px-2"
+                    )}
+                    <div className={`flex gap-3 ${isOwn ? "flex-row-reverse" : ""}`}>
+                      <Avatar className="w-9 h-9 flex-shrink-0">
+                        <AvatarImage src={msg.user?.avatar_url || ""} />
+                        <AvatarFallback className="bg-cyan-500/20 text-cyan-400 text-sm">
+                          {msg.user?.username?.[0]?.toUpperCase() || "?"}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className={`max-w-[75%] ${isOwn ? "items-end" : "items-start"} flex flex-col`}>
+                        <div className={`flex items-center gap-2 mb-1 ${isOwn ? "flex-row-reverse" : ""}`}>
+                          <span className="text-xs font-medium text-muted-foreground">
+                            {isOwn ? "You" : msg.user?.display_name || msg.user?.username}
+                          </span>
+                          <span className="text-xs text-muted-foreground/50">
+                            {formatMessageTime(msg.created_at)}
+                          </span>
+                          {isPending && (
+                            <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
+                          )}
+                          {isFailed && (
+                            <AlertCircle className="w-3 h-3 text-rose-400" />
+                          )}
+                        </div>
+                        <div
+                          className={`rounded-2xl ${
+                            isGif || isImage
+                              ? "p-1 bg-transparent"
+                              : `px-4 py-2.5 ${
+                                  isOwn
+                                    ? isFailed
+                                      ? "bg-rose-500/20 text-white rounded-tr-sm border border-rose-500/40"
+                                      : "bg-cyan-500 text-white rounded-tr-sm"
+                                    : "bg-secondary/80 rounded-tl-sm"
+                                }`
+                          } ${isPending ? "opacity-70" : ""}`}
                         >
-                          Tap to retry
-                        </Button>
-                      )}
+                          {isGif || isImage ? (
+                            <img
+                              src={msg.content}
+                              alt="Message"
+                              className="rounded-xl max-w-full max-h-[220px] object-contain"
+                            />
+                          ) : (
+                            <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
+                          )}
+                        </div>
+                        {isFailed && isOwn && msg.client_id && (
+                          <Button
+                            onClick={() => retryMessage(msg.client_id!)}
+                            variant="ghost"
+                            size="sm"
+                            className="mt-1 text-xs text-rose-400 hover:text-rose-300 h-auto py-1 px-2"
+                          >
+                            Tap to retry
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )
