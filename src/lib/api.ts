@@ -2,6 +2,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://tap-in2026-jj45
 
 export function getApiUrl(path: string): string {
   if (path.startsWith('http://') || path.startsWith('https://')) {
+    console.log(`[getApiUrl] Already full URL:`, path)
     return path
   }
   
@@ -25,12 +26,14 @@ export function getApiUrl(path: string): string {
       // 172.16.x.x - 172.31.x.x range
       /^172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)
     
-    if (isLocalDev) {
-      return cleanPath
-    }
+    const finalUrl = isLocalDev ? cleanPath : `${API_BASE_URL}${cleanPath}`
+    console.log(`[getApiUrl] hostname:${hostname} isLocalDev:${isLocalDev} path:${cleanPath} => ${finalUrl}`)
+    return finalUrl
   }
   
-  return `${API_BASE_URL}${cleanPath}`
+  const finalUrl = `${API_BASE_URL}${cleanPath}`
+  console.log(`[getApiUrl] [SSR] path:${cleanPath} => ${finalUrl}`)
+  return finalUrl
 }
 
 export async function apiRequest(path: string, options?: RequestInit): Promise<Response> {

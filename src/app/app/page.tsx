@@ -224,12 +224,22 @@ export default function AppPage() {
 
   const logLocation = useCallback(
     (message: string, data?: unknown) => {
+      const online = (networkStatus as any).isOnline ?? networkStatus.status
+      const connType = (networkStatus as any).connectionType ?? "unknown"
       console.log(
-        `[LocationDebug][${isNative ? "native" : "web"}][online:${(networkStatus as any).isOnline ?? networkStatus.status}] ${message}`,
+        `[LocationDebug][${isNative ? "native" : "web"}][${connType}:${online}] ${message}`,
         data ?? ""
       )
     },
     [isNative, networkStatus]
+  )
+
+  const logApi = useCallback(
+    (message: string, data?: unknown) => {
+      const online = (networkStatus as any).isOnline ?? networkStatus.status
+      console.log(`[API][online:${online}] ${message}`, data ?? "")
+    },
+    [networkStatus]
   )
 
   useEffect(() => {
@@ -356,21 +366,23 @@ export default function AppPage() {
 
     try {
       const url = getApiUrl(`/api/people-nearby?scope=world&limit=${NEARBY_PEOPLE_LIMIT}&userId=${userId}${city ? `&city=${encodeURIComponent(city)}` : ""}`)
-      logLocation("fetchNearbyPeople:start", { url, city, userId, cached: Boolean(cached) })
+      logApi("fetchNearbyPeople:fetch", { url, city, userId, cached: Boolean(cached) })
       const res = await fetch(url, {
         signal: controller.signal,
       })
       
+      logApi("fetchNearbyPeople:response", { status: res.status, ok: res.ok, statusText: res.statusText })
+      
       if (!res.ok) throw new Error(`Failed to fetch nearby (status ${res.status})`)
       
       const data = await res.json()
-      logLocation("fetchNearbyPeople:success", { count: data.people?.length })
+      logApi("fetchNearbyPeople:success", { count: data.people?.length })
       if (data.people) {
         setNearbyPeople(data.people)
         cacheSet(cacheKey, data.people, NEARBY_CACHE_TTL)
       }
     } catch (err: any) {
-      logLocation("fetchNearbyPeople:error", { message: err?.message })
+      logApi("fetchNearbyPeople:error", { name: err?.name, message: err?.message })
       if (err.name !== 'AbortError' && !cached) {
         setNetworkError("Could not refresh nearby people. Check connection.")
       }
@@ -378,7 +390,7 @@ export default function AppPage() {
       fetchNearbyInProgressRef.current = false
       fetchAbortControllersRef.current.delete(fetchKey)
     }
-  }, [logLocation])
+  }, [logApi, cacheGet, cacheSet])
 
   const updateUserLocation = useCallback(async (userId: string, lat: number, lng: number, city: string) => {
     const now = Date.now()
@@ -406,16 +418,17 @@ export default function AppPage() {
 
     try {
       const body = { userId, latitude: lat, longitude: lng, city }
-      logLocation("updateUserLocation:start", body)
-      const res = await fetch(getApiUrl("/api/people-nearby"), {
+      const url = getApiUrl("/api/people-nearby")
+      logApi("updateUserLocation:fetch", { url, body })
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
         signal: controller.signal,
       })
-      logLocation("updateUserLocation:response", { status: res.status, ok: res.ok })
+      logApi("updateUserLocation:response", { status: res.status, ok: res.ok, statusText: res.statusText })
     } catch (err: any) {
-      logLocation("updateUserLocation:error", { message: err?.message })
+      logApi("updateUserLocation:error", { name: err?.name, message: err?.message })
       if (err.name !== 'AbortError') {
         setNetworkError("Location update failed. Reconnecting...")
       }
@@ -423,7 +436,7 @@ export default function AppPage() {
       updateLocationInProgressRef.current = false
       fetchAbortControllersRef.current.delete(fetchKey)
     }
-  }, [logLocation])
+  }, [logApi, logLocation])
 
   const sendPresenceHeartbeat = useCallback(async (userId: string) => {
     if (!networkStatus.isOnline) return
@@ -467,9 +480,12 @@ export default function AppPage() {
     fetchAbortControllersRef.current.set(fetchKey, controller)
 
     try {
-      const res = await fetch(`/api/chat-history?userId=${userId}`, {
+      const url = getApiUrl(`/api/chat-history?userId=${userId}`)
+      logApi("fetchHistory:fetch", { url, userId })
+      const res = await fetch(url, {
         signal: controller.signal,
       })
+      logApi("fetchHistory:response", { status: res.status, ok: res.ok })
       const data = await res.json()
       if (data.history) {
         const filtered = (data.history as ChatVisit[]).filter((item) => item.chat)
@@ -477,13 +493,14 @@ export default function AppPage() {
         cacheSet(cacheKey, filtered, 3)
       }
     } catch (err: any) {
+      logApi("fetchHistory:error", { name: err?.name, message: err?.message })
       if (err.name !== 'AbortError' && !cached) {
         setNetworkError("History unavailable right now. Try again soon.")
       }
     } finally {
       fetchAbortControllersRef.current.delete(fetchKey)
     }
-  }, [])
+  }, [logApi, cacheGet, cacheSet])
 
   const fetchLocationPhotos = useCallback(async (chatId?: string, lat?: number, lng?: number) => {
     const fetchKey = `photos-${chatId || `${lat}-${lng}`}`
@@ -505,7 +522,10 @@ export default function AppPage() {
         return
       }
 
-      const res = await fetch(getApiUrl(url), { signal: controller.signal })
+      const fullUrl = getApiUrl(url)
+      logApi("fetchLocationPhotos:fetch", { fullUrl, chatId, lat, lng })
+      const res = await fetch(fullUrl, { signal: controller.signal })
+      logApi("fetchLocationPhotos:response", { status: res.status, ok: res.ok })
       if (!res.ok) {
         console.warn(`[Photos] Fetch failed: ${res.status}`)
         return
@@ -514,15 +534,17 @@ export default function AppPage() {
       const data = await res.json()
       if (data.photos) {
         setLocationPhotos(data.photos)
+        logApi("fetchLocationPhotos:success", { count: data.photos.length })
       }
     } catch (error: any) {
+      logApi("fetchLocationPhotos:error", { name: error?.name, message: error?.message })
       if (error.name !== 'AbortError') {
         console.warn("[Photos] Fetch error:", error.message)
       }
     } finally {
       fetchAbortControllersRef.current.delete(fetchKey)
     }
-  }, [])
+  }, [logApi])
 
   const autoJoinProximityChat = useCallback(async (lat: number, lng: number, locationName: string, userId?: string) => {
      if (autoJoinInProgressRef.current) return
@@ -550,25 +572,28 @@ export default function AppPage() {
        const timeoutId = setTimeout(() => controller.abort(), 8000)
        
        try {
-         logLocation("autoJoinProximityChat:start", { lat: roundedLat, lng: roundedLng, finalLocationName })
-         const res = await fetch(getApiUrl("/api/location-chat"), {
+         const url = getApiUrl("/api/location-chat")
+         const body = {
+           auto_join: true,
+           latitude: roundedLat,
+           longitude: roundedLng,
+           location_name: finalLocationName,
+         }
+         logApi("autoJoinProximityChat:fetch", { url, body })
+         const res = await fetch(url, {
            method: "POST",
            headers: { "Content-Type": "application/json" },
-           body: JSON.stringify({
-             auto_join: true,
-             latitude: roundedLat,
-             longitude: roundedLng,
-             location_name: finalLocationName,
-           }),
+           body: JSON.stringify(body),
            signal: controller.signal,
          })
          
          clearTimeout(timeoutId)
-         logLocation("autoJoinProximityChat:response", { status: res.status, ok: res.ok })
+         logApi("autoJoinProximityChat:response", { status: res.status, ok: res.ok, statusText: res.statusText })
          
          if (!res.ok) return
          
          const data = await res.json()
+         logApi("autoJoinProximityChat:data", { chatId: data.chat?.id })
          if (data.chat) {
            logLocation("autoJoinProximityChat:joined", { chatId: data.chat.id })
            setProximityChat(data.chat)
@@ -589,7 +614,7 @@ export default function AppPage() {
        } catch (fetchErr: any) {
          clearTimeout(timeoutId)
          if (fetchErr.name === 'AbortError' || fetchErr.message?.includes('Failed to fetch')) {
-           logLocation("autoJoinProximityChat:abortedOrOffline", { message: fetchErr.message })
+           logApi("autoJoinProximityChat:abortedOrOffline", { name: fetchErr.name, message: fetchErr.message })
            return
          }
          throw fetchErr
@@ -597,12 +622,12 @@ export default function AppPage() {
      } catch (err: any) {
        if (err.name !== 'AbortError' && !err.message?.includes('Failed to fetch')) {
          console.error('[AutoJoin] Unexpected error:', err.message)
-         logLocation("autoJoinProximityChat:error", { message: err.message })
+         logApi("autoJoinProximityChat:error", { name: err.name, message: err.message })
        }
      } finally {
        autoJoinInProgressRef.current = false
      }
-   }, [fetchHistory, lastKnownAddress, logLocation])
+   }, [fetchHistory, lastKnownAddress, logApi, logLocation])
 
   const fetchMessages = useCallback(async (chatId: string, userId?: string) => {
      if (!userId) {
@@ -659,15 +684,19 @@ export default function AppPage() {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 3000)
       
-      const res = await fetch(getApiUrl(`/api/geocode?lat=${lat}&lng=${lng}`), {
+      const url = getApiUrl(`/api/geocode?lat=${lat}&lng=${lng}`)
+      logApi("reverseGeocode:fetch", { url, lat, lng })
+      
+      const res = await fetch(url, {
         signal: controller.signal
       })
       
       clearTimeout(timeoutId)
-      logLocation("reverseGeocode:response", { status: res.status, ok: res.ok })
+      logApi("reverseGeocode:response", { status: res.status, ok: res.ok, statusText: res.statusText })
       
       if (res.ok) {
         const data = await res.json()
+        logApi("reverseGeocode:data", data)
         if (data.name && data.city) {
           setLastKnownAddress(data.name)
           logLocation("reverseGeocode:success", data)
@@ -681,7 +710,7 @@ export default function AppPage() {
       }
     } catch (err) {
       if (err instanceof Error && err.name !== 'AbortError') {
-        logLocation("reverseGeocode:error", { message: err.message })
+        logApi("reverseGeocode:error", { name: err.name, message: err.message, stack: err.stack })
         console.error("Geocoding error:", err)
       }
     } finally {
@@ -942,7 +971,11 @@ export default function AppPage() {
 
   useEffect(() => {
     const initOnce = async () => {
-      logLocation("init:start")
+      logLocation("init:start", {
+        hostname: typeof window !== "undefined" ? window.location.hostname : "SSR",
+        href: typeof window !== "undefined" ? window.location.href : "SSR",
+        NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+      })
       const { data: { user: authUser } } = await supabase.auth.getUser()
       if (!authUser) {
         router.push("/login")
@@ -955,7 +988,7 @@ export default function AppPage() {
       if (cachedLocStr) {
         try {
           cachedLoc = JSON.parse(cachedLocStr)
-          logLocation('[Init] Using cached location', cachedLoc)
+          logLocation('[Init-SSR] Loaded cached location:', cachedLoc)
         } catch (err) {
           console.error('[Init] Failed to parse cached location:', err)
         }
