@@ -2141,7 +2141,7 @@ export default function AppPage() {
 
             {activeTab === "map" && (
               <>
-                <div className="h-[380px] sm:h-[440px]">
+                <div className="h-[380px] sm:h-[440px] relative">
                   {(searchedLocation || location) && (
                     <Suspense fallback={
                       <div className="w-full h-full flex items-center justify-center">
@@ -2161,6 +2161,20 @@ export default function AppPage() {
                       />
                     </Suspense>
                   )}
+
+                  <Button
+                    onClick={handleLocateMe}
+                    disabled={isLocating}
+                    size="icon"
+                    aria-label="Locate me"
+                    className="absolute bottom-4 right-4 rounded-full h-12 w-12 bg-background/80 border border-border/60 shadow-lg backdrop-blur hover:bg-background"
+                  >
+                    {isLocating ? (
+                      <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                    ) : (
+                      <Target className="w-5 h-5 text-primary" />
+                    )}
+                  </Button>
                 </div>
                 <div className="p-4 border-t border-border/50">
                   <div className="flex items-center justify-center gap-2 text-base">
