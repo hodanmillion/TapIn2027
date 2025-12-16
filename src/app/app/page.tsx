@@ -477,7 +477,7 @@ export default function AppPage() {
          if (currentAddress && currentAddress !== "Locating..." && currentAddress !== "Unknown") {
            finalLocationName = currentAddress
          } else {
-           finalLocationName = `Location ${Math.abs(roundedLat)},${Math.abs(roundedLng)}`
+           finalLocationName = "Nearby"
          }
        }
        
@@ -619,11 +619,11 @@ export default function AppPage() {
       return { name: lastKnownAddress, city: fallbackCity }
     }
     
-    const roundedName = `Location ${Math.abs(lat.toFixed(2))},${Math.abs(lng.toFixed(2))}`
-    setLastKnownAddress(roundedName)
+    const fallbackName = "Nearby"
+    setLastKnownAddress(fallbackName)
     
     return { 
-      name: roundedName, 
+      name: fallbackName, 
       city: fallbackCity 
     }
   }
@@ -645,7 +645,7 @@ export default function AppPage() {
     if (lat >= -37.9 && lat <= -37.7 && lng >= 144.9 && lng <= 145.1) return "Melbourne"
     if (lat >= 35.5 && lat <= 35.8 && lng >= 139.6 && lng <= 139.9) return "Tokyo"
     if (lat >= 1.2 && lat <= 1.4 && lng >= 103.7 && lng <= 104) return "Singapore"
-    return `Location ${Math.abs(lat.toFixed(1))},${Math.abs(lng.toFixed(1))}`
+    return "Nearby"
   }
 
   const applyPosition = useCallback(async (coords: GeolocationCoordinates, userId?: string) => {

@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'TapIn',
   webDir: 'out',
   server: {
-    url: 'https://tap-in2026-jj45.vercel.app',
+    url: 'https://tap-in2026-jj45.vercel.app/?v=20251215-1947',
     cleartext: true
   }
 };
