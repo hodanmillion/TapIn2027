@@ -12,6 +12,20 @@ export function getApiUrl(path: string): string {
   if (typeof window !== 'undefined') {
     const hostname = window.location.hostname
     const isCapacitorNative = window.location.protocol === 'capacitor:' || Boolean((window as any).Capacitor?.isNativePlatform?.())
+    const currentOrigin = `${window.location.protocol}//${window.location.host}`
+    let apiOrigin = API_BASE_URL
+
+    // If API_BASE_URL is set to a different host than the current web host,
+    // prefer the current origin on web to avoid CORS issues. Native will still
+    // use the absolute API_BASE_URL.
+    try {
+      const apiHost = new URL(API_BASE_URL).host
+      if (apiHost !== window.location.host) {
+        apiOrigin = currentOrigin
+      }
+    } catch {
+      apiOrigin = currentOrigin
+    }
     
     // Check if running on localhost or private network (web dev)
     const isLocalDev = 
@@ -27,14 +41,10 @@ export function getApiUrl(path: string): string {
       // 172.16.x.x - 172.31.x.x range
       /^172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)
 
-    // On native (Capacitor), always use absolute API URL even though hostname is localhost
-    const finalUrl = isCapacitorNative
-      ? `${API_BASE_URL}${cleanPath}`
-      : isLocalDev
-        ? cleanPath
-        : `${API_BASE_URL}${cleanPath}`
+    const base = isCapacitorNative ? API_BASE_URL : apiOrigin
+    const finalUrl = isLocalDev ? cleanPath : `${base}${cleanPath}`
 
-    console.log(`[getApiUrl] hostname:${hostname} protocol:${window.location.protocol} isCapacitorNative:${isCapacitorNative} isLocalDev:${isLocalDev} path:${cleanPath} => ${finalUrl}`)
+    console.log(`[getApiUrl] hostname:${hostname} protocol:${window.location.protocol} isCapacitorNative:${isCapacitorNative} isLocalDev:${isLocalDev} apiOrigin:${base} path:${cleanPath} => ${finalUrl}`)
     return finalUrl
   }
   
