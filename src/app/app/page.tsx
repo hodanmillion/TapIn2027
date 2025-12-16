@@ -1035,7 +1035,7 @@ export default function AppPage() {
   }, [proximityChat, location, fetchLocationPhotos])
 
   const sendMessage = async () => {
-    if (!newMessage.trim() || !selectedChat || !user) return
+    if (!newMessage.trim() || !selectedChat || !user || !isInProximityChat) return
     setSending(true)
 
     const messageContent = newMessage.trim()
@@ -1969,187 +1969,182 @@ export default function AppPage() {
             </div>
           </div>
 
-          {isInProximityChat ? (
-            <div className="p-4 glass border-t border-border/50 flex-shrink-0">
-              <div className="max-w-4xl mx-auto">
-                {imageError && (
-                  <div className="mb-3 text-sm text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 w-fit">
-                    {imageError}
-                  </div>
-                )}
-                {isInProximityChat && (
-                  <div className="mb-3 rounded-2xl border border-border/50 bg-secondary/40 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Target className="w-4 h-4 text-cyan-400" />
-                        <span className="text-sm font-semibold">Vibe check</span>
-                      </div>
-                      {pollLoading && <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />}
-                    </div>
-                    {pollError && <p className="text-xs text-amber-300 mt-2">{pollError}</p>}
-                    <div className="grid grid-cols-3 gap-2 mt-3">
-                      {(
-                        [
-                          { key: "connect", label: "Connect" },
-                          { key: "chill", label: "Chill" },
-                          { key: "group", label: "Group" },
-                        ] as const
-                      ).map((option) => {
-                        const isActive = pollUserVote === option.key
-                        const count = pollVotes[option.key]
-                        return (
-                          <button
-                            key={option.key}
-                            onClick={() => submitPollVote(option.key)}
-                            disabled={pollLoading}
-                            className={`rounded-xl border px-3 py-2 text-xs text-left transition-all ${
-                              isActive
-                                ? 'border-cyan-400 bg-cyan-500/15 text-white'
-                                : 'border-border/60 bg-background/40 hover:border-border'
-                            } ${pollLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold">{option.label}</span>
-                              <span className="text-[11px] text-muted-foreground">{count} votes</span>
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-                {typingUsers.length > 0 && (
-                  <div className="mb-2 text-xs text-muted-foreground flex items-center gap-2">
-                    <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
-                    <span>
-                      {typingUsers.map((t) => t.name).join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
-                    </span>
-                  </div>
-                )}
-                {showEmojiPicker && (
-                  <div className="absolute bottom-20 left-4 right-4 z-50">
-                    <div className="relative max-w-sm mx-auto">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="absolute -top-2 -right-2 z-10 rounded-full bg-secondary h-8 w-8"
-                        onClick={() => setShowEmojiPicker(false)}
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                      <EmojiPicker
-                        onEmojiClick={handleEmojiClick}
-                        theme="dark"
-                        width="100%"
-                        height={300}
-                        previewConfig={{ showPreview: false }}
-                      />
-                    </div>
-                  </div>
-                )}
-                {showGifPicker && (
-                  <div className="absolute bottom-20 left-4 right-4 z-50">
-                    <div className="relative max-w-sm mx-auto">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="absolute -top-2 -right-2 z-10 rounded-full bg-secondary h-8 w-8"
-                        onClick={() => setShowGifPicker(false)}
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                      <GifPicker
-                        tenorApiKey={process.env.NEXT_PUBLIC_TENOR_API_KEY || ""}
-                        onGifClick={handleGifSelect}
-                        theme="dark"
-                        width="100%"
-                        height={300}
-                      />
-                    </div>
-                  </div>
-                )}
-                <input
-                  ref={imageInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
-                    handleImageUpload(file)
-                    e.target.value = ""
-                  }}
-                />
-                <div className="flex gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="rounded-xl h-11 w-11 flex-shrink-0"
-                    onClick={() => {
-                      setShowGifPicker(false)
-                      setShowEmojiPicker(!showEmojiPicker)
-                    }}
-                  >
-                    <Smile className="w-5 h-5 text-muted-foreground" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="rounded-xl h-11 w-11 flex-shrink-0"
-                    onClick={() => imageInputRef.current?.click()}
-                    disabled={uploadingImage || sending}
-                  >
-                    {uploadingImage ? <Loader2 className="w-5 h-5 animate-spin" /> : <Image className="w-5 h-5 text-muted-foreground" />}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="rounded-xl h-11 w-11 flex-shrink-0"
-                    onClick={() => {
-                      setShowEmojiPicker(false)
-                      setShowGifPicker(!showGifPicker)
-                    }}
-                  >
-                    <MessageCircle className="w-5 h-5 text-muted-foreground" />
-                  </Button>
-                  <Input
-                    placeholder="Type a message..."
-                    value={newMessage}
-                    onChange={(e) => {
-                      setNewMessage(e.target.value)
-                      sendTypingPing()
-                    }}
-                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
-                    className="flex-1 bg-secondary/50 border-border/50 rounded-xl h-11"
-                    disabled={sending || uploadingImage}
-                    onFocus={() => {
-                      setShowEmojiPicker(false)
-                      setShowGifPicker(false)
-                    }}
-                  />
-                  <Button
-                    onClick={sendMessage}
-                    disabled={!newMessage.trim() || sending || uploadingImage}
-                    className="rounded-xl bg-cyan-500 hover:bg-cyan-600 h-11 w-11"
-                  >
-                    {sending ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Send className="w-5 h-5" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="p-4 glass border-t border-border/50 flex-shrink-0">
-              <div className="max-w-4xl mx-auto text-center">
-                <div className="flex items-center justify-center gap-2 text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl py-3 px-4">
+          <div className="p-4 glass border-t border-border/50 flex-shrink-0">
+            <div className="max-w-4xl mx-auto">
+              {!isInProximityChat && (
+                <div className="mb-3 flex items-center justify-center gap-2 text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl py-3 px-4">
                   <Info className="w-5 h-5" />
                   <span>You can view this chat but can't send messages. Return to this location to participate.</span>
                 </div>
+              )}
+              {imageError && (
+                <div className="mb-3 text-sm text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 w-fit">
+                  {imageError}
+                </div>
+              )}
+              {isInProximityChat && (
+                <div className="mb-3 rounded-2xl border border-border/50 bg-secondary/40 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Target className="w-4 h-4 text-cyan-400" />
+                      <span className="text-sm font-semibold">Vibe check</span>
+                    </div>
+                    {pollLoading && <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />}
+                  </div>
+                  {pollError && <p className="text-xs text-amber-300 mt-2">{pollError}</p>}
+                  <div className="grid grid-cols-3 gap-2 mt-3">
+                    {(
+                      [
+                        { key: "connect", label: "Connect" },
+                        { key: "chill", label: "Chill" },
+                        { key: "group", label: "Group" },
+                      ] as const
+                    ).map((option) => {
+                      const isActive = pollUserVote === option.key
+                      const count = pollVotes[option.key]
+                      return (
+                        <button
+                          key={option.key}
+                          onClick={() => submitPollVote(option.key)}
+                          disabled={pollLoading}
+                          className={`rounded-xl border px-3 py-2 text-xs text-left transition-all ${
+                            isActive
+                              ? 'border-cyan-400 bg-cyan-500/15 text-white'
+                              : 'border-border/60 bg-background/40 hover:border-border'
+                          } ${pollLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold">{option.label}</span>
+                            <span className="text-[11px] text-muted-foreground">{count} votes</span>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+              {isInProximityChat && typingUsers.length > 0 && (
+                <div className="mb-2 text-xs text-muted-foreground flex items-center gap-2">
+                  <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
+                  <span>
+                    {typingUsers.map((t) => t.name).join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+                  </span>
+                </div>
+              )}
+              {showEmojiPicker && (
+                <div className="absolute bottom-20 left-4 right-4 z-50">
+                  <div className="relative max-w-sm mx-auto">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="absolute -top-2 -right-2 z-10 rounded-full bg-secondary h-8 w-8"
+                      onClick={() => setShowEmojiPicker(false)}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                    <EmojiPicker
+                      onEmojiClick={handleEmojiClick}
+                      theme="dark"
+                      width="100%"
+                      height={300}
+                      previewConfig={{ showPreview: false }}
+                    />
+                  </div>
+                </div>
+              )}
+              {showGifPicker && (
+                <div className="absolute bottom-20 left-4 right-4 z-50">
+                  <div className="relative max-w-sm mx-auto">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="absolute -top-2 -right-2 z-10 rounded-full bg-secondary h-8 w-8"
+                      onClick={() => setShowGifPicker(false)}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                    <GifPicker
+                      tenorApiKey={process.env.NEXT_PUBLIC_TENOR_API_KEY || ""}
+                      onGifClick={handleGifSelect}
+                      theme="dark"
+                      width="100%"
+                      height={300}
+                    />
+                  </div>
+                </div>
+              )}
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  handleImageUpload(file)
+                  e.target.value = ""
+                }}
+              />
+              <div className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-xl h-11 w-11 flex-shrink-0"
+                  onClick={() => {
+                    setShowGifPicker(false)
+                    setShowEmojiPicker(!showEmojiPicker)
+                  }}
+                >
+                  <Smile className="w-5 h-5 text-muted-foreground" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-xl h-11 w-11 flex-shrink-0"
+                  onClick={() => imageInputRef.current?.click()}
+                  disabled={uploadingImage || sending || !isInProximityChat}
+                >
+                  {uploadingImage ? <Loader2 className="w-5 h-5 animate-spin" /> : <Image className="w-5 h-5 text-muted-foreground" />}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-xl h-11 w-11 flex-shrink-0"
+                  onClick={() => {
+                    setShowEmojiPicker(false)
+                    setShowGifPicker(!showGifPicker)
+                  }}
+                >
+                  <MessageCircle className="w-5 h-5 text-muted-foreground" />
+                </Button>
+                <Input
+                  placeholder={isInProximityChat ? "Type a message..." : "Move closer to send a message"}
+                  value={newMessage}
+                  onChange={(e) => {
+                    setNewMessage(e.target.value)
+                    sendTypingPing()
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
+                  className="flex-1 bg-secondary/50 border-border/50 rounded-xl h-11"
+                  disabled={sending || uploadingImage || !isInProximityChat}
+                  onFocus={() => {
+                    setShowEmojiPicker(false)
+                    setShowGifPicker(false)
+                  }}
+                />
+                <Button
+                  onClick={sendMessage}
+                  disabled={!newMessage.trim() || sending || uploadingImage || !isInProximityChat}
+                  className="rounded-xl bg-cyan-500 hover:bg-cyan-600 h-11 w-11"
+                >
+                  {sending ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Send className="w-5 h-5" />
+                  )}
+                </Button>
               </div>
             </div>
-          )}
+          </div>
         </div>
       </>
     )
