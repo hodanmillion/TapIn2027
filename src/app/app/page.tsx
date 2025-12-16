@@ -966,29 +966,7 @@ export default function AppPage() {
     setNewMessage("")
 
     try {
-      const response = await fetch(getApiUrl("/api/location-chat/messages"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: selectedChat.id,
-          user_id: user.id,
-          content: messageContent,
-          message_type: "text",
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
-        console.error('[SendMessage] Failed:', response.status, errorData)
-        
-        setNewMessage(messageContent)
-        return
-      }
-
-      if (typeof window !== "undefined") {
-        localStorage.removeItem(`tapin:messages:${selectedChat.id}`)
-      }
-      
+      await sendMessageViaHook(messageContent, "text")
       scrollToBottom()
     } catch (error) {
       console.error("Failed to send message:", error)
@@ -1063,21 +1041,7 @@ export default function AppPage() {
     setSending(true)
 
     try {
-      const response = await fetch(getApiUrl("/api/location-chat/messages"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: selectedChat.id,
-          user_id: user.id,
-          content: gif.url,
-          message_type: "gif",
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
-        console.error('[GIF] Failed to send:', response.status, errorData)
-      }
+      await sendMessageViaHook(gif.url, "gif")
     } catch (error) {
       console.error('[GIF] Error:', error)
     } finally {
@@ -1097,7 +1061,7 @@ export default function AppPage() {
 
   const handleImageUpload = async (file?: File) => {
     if (!selectedChat || !user || !file) return
-      
+        
     setImageError("")
     setShowEmojiPicker(false)
     setShowGifPicker(false)
@@ -1130,29 +1094,7 @@ export default function AppPage() {
 
       const { url } = await uploadRes.json()
 
-      const messageRes = await fetch(getApiUrl("/api/location-chat/messages"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: selectedChat.id,
-          user_id: user.id,
-          content: url,
-          message_type: "image",
-        }),
-      })
-
-      if (!messageRes.ok) {
-        const errorData = await messageRes.json().catch(() => ({ error: 'Unknown error' }))
-        if (messageRes.status === 403) {
-          throw new Error("You're too far from this chat location")
-        } else {
-          throw new Error(errorData.error || "Failed to send image")
-        }
-      }
-
-      if (typeof window !== "undefined") {
-        localStorage.removeItem(`tapin:messages:${selectedChat.id}`)
-      }
+      await sendMessageViaHook(url, "image")
     } catch (error: any) {
       setImageError(error.message || "Could not upload image")
     } finally {
