@@ -2325,7 +2325,7 @@ export default function AppPage() {
                                   {getDisplayableChatName(visit.chat?.location_name || null, visit.location_name)}
                                 </h3>
                                 <p className="text-xs text-muted-foreground mt-0.5">
-                                  {isActive ? "Current location" : `Visited ${formatTime(visit.visited_at)}`}
+                                  {isActive ? "Current location" : `Visited ${formatMessageTime(visit.visited_at)}`}
                                 </p>
                               </div>
                             </div>
