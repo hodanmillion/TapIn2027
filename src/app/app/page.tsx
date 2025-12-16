@@ -191,6 +191,8 @@ export default function AppPage() {
   const [pollUserVote, setPollUserVote] = useState<"connect" | "chill" | "group" | null>(null)
   const [pollLoading, setPollLoading] = useState(false)
   const [pollError, setPollError] = useState("")
+  const [reactions, setReactions] = useState<Record<string, { emoji: string; user_id: string; id: string }[]>>({})
+  const [reactionBusy, setReactionBusy] = useState<string | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -1535,20 +1537,20 @@ export default function AppPage() {
     if (!selectedChat || !user || !isInProximityChat) return
     setPollLoading(true)
     setPollError("")
-
+ 
     try {
       const res = await fetch(getApiUrl("/api/location-chat/poll"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_id: selectedChat.id, user_id: user.id, option }),
       })
-
+ 
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setPollError(data.error || "Unable to vote right now.")
         return
       }
-
+ 
       if (data.votes) setPollVotes(data.votes)
       setPollUserVote(data.option || option)
     } catch (err) {
@@ -1564,9 +1566,104 @@ export default function AppPage() {
       setPollUserVote(null)
       return
     }
-
+ 
     fetchPoll(selectedChat.id, user.id)
   }, [selectedChat, user, isInProximityChat, fetchPoll])
+
+  const fetchReactionsForMessages = useCallback(async (messageIds: string[]) => {
+    if (messageIds.length === 0) return
+
+    const uniqueIds = Array.from(new Set(messageIds))
+
+    const fetchKey = `reactions-${selectedChat?.id || ""}`
+    const existingController = fetchAbortControllersRef.current.get(fetchKey)
+    if (existingController) {
+      existingController.abort()
+    }
+
+    const controller = new AbortController()
+    fetchAbortControllersRef.current.set(fetchKey, controller)
+
+    try {
+      const res = await fetch(getApiUrl(`/api/location-chat/reactions?messageIds=${uniqueIds.join(",")}`), {
+        signal: controller.signal,
+      })
+      if (!res.ok) return
+      const data = await res.json()
+      setReactions(data.reactions || {})
+    } catch (err: any) {
+      if (err.name !== "AbortError") {
+        console.warn("[Reactions] Fetch failed", err)
+      }
+    } finally {
+      fetchAbortControllersRef.current.delete(fetchKey)
+    }
+  }, [selectedChat?.id])
+
+  useEffect(() => {
+    if (!selectedChat) {
+      setReactions({})
+      return
+    }
+
+    const ids = messages
+      .map((m) => m.id)
+      .filter((id) => id && !String(id).startsWith("client-")) as string[]
+
+    if (ids.length === 0) {
+      setReactions({})
+      return
+    }
+
+    fetchReactionsForMessages(ids)
+  }, [messages, selectedChat, fetchReactionsForMessages])
+
+  const toggleHeartReaction = useCallback(async (messageId: string) => {
+    if (!user || reactionBusy === messageId) return
+    const emoji = "❤️"
+    const prev = reactions[messageId] || []
+    const hasReacted = prev.some((r) => r.user_id === user.id && r.emoji === emoji)
+    const optimistic = hasReacted
+      ? prev.filter((r) => !(r.user_id === user.id && r.emoji === emoji))
+      : [...prev, { emoji, user_id: user.id, id: `temp-${Date.now()}` }]
+
+    setReactionBusy(messageId)
+    setReactions((curr) => ({ ...curr, [messageId]: optimistic }))
+
+    try {
+      const res = await fetch(getApiUrl("/api/location-chat/reactions"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message_id: messageId, user_id: user.id, emoji }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || "Reaction failed")
+
+      if (data.action === "added" && data.reaction) {
+        setReactions((curr) => ({
+          ...curr,
+          [messageId]: (curr[messageId] || []).filter((r) => !r.id.startsWith("temp-")).concat({
+            emoji: data.reaction.emoji,
+            user_id: data.reaction.user_id,
+            id: data.reaction.id,
+          }),
+        }))
+      }
+
+      if (data.action === "removed") {
+        setReactions((curr) => ({
+          ...curr,
+          [messageId]: (curr[messageId] || []).filter((r) => !(r.user_id === user.id && r.emoji === emoji)),
+        }))
+      }
+    } catch (err) {
+      console.warn("[Reactions] Toggle failed", err)
+      setReactions((curr) => ({ ...curr, [messageId]: prev }))
+    } finally {
+      setReactionBusy(null)
+    }
+  }, [user, reactions, reactionBusy])
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
@@ -1780,6 +1877,9 @@ export default function AppPage() {
                 const isFailed = msg.status === "failed"
                 const nextMsg = messages[index + 1]
                 const dateSeparator = getDateSeparator(msg.created_at, nextMsg?.created_at)
+                const msgReactions = reactions[msg.id] || []
+                const heartCount = msgReactions.filter((r) => r.emoji === "❤️").length
+                const userReacted = msgReactions.some((r) => r.user_id === user?.id && r.emoji === "❤️")
                 
                 return (
                   <div key={msg.client_id || msg.id}>
@@ -1833,6 +1933,21 @@ export default function AppPage() {
                             />
                           ) : (
                             <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
+                          )}
+                        </div>
+                        <div className={`flex items-center gap-2 mt-1 ${isOwn ? "flex-row-reverse" : ""}`}>
+                          <button
+                            onClick={() => msg.id && toggleHeartReaction(msg.id)}
+                            disabled={!msg.id || !isInProximityChat || reactionBusy === msg.id}
+                            className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border/50 bg-background/40 transition-colors ${
+                              userReacted ? "text-rose-400 border-rose-500/40" : "text-muted-foreground"
+                            } ${!isInProximityChat ? "opacity-60 cursor-not-allowed" : "hover:border-border"}`}
+                          >
+                            <Heart className={`w-3 h-3 ${userReacted ? "fill-rose-400" : ""}`} />
+                            <span>{heartCount || "Like"}</span>
+                          </button>
+                          {heartCount > 0 && !userReacted && (
+                            <span className="text-[11px] text-muted-foreground">{heartCount} liked</span>
                           )}
                         </div>
                         {isFailed && isOwn && msg.client_id && (
