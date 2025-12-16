@@ -187,10 +187,6 @@ export default function AppPage() {
   const [isSearching, setIsSearching] = useState(false)
   const [isLocating, setIsLocating] = useState(false)
   const [typingUsers, setTypingUsers] = useState<{ id: string; name: string }[]>([])
-  const [pollVotes, setPollVotes] = useState<{ connect: number; chill: number; group: number }>({ connect: 0, chill: 0, group: 0 })
-  const [pollUserVote, setPollUserVote] = useState<"connect" | "chill" | "group" | null>(null)
-  const [pollLoading, setPollLoading] = useState(false)
-  const [pollError, setPollError] = useState("")
   const [reactions, setReactions] = useState<Record<string, { emoji: string; user_id: string; id: string }[]>>({})
   const [reactionBusy, setReactionBusy] = useState<string | null>(null)
 
@@ -1517,59 +1513,6 @@ export default function AppPage() {
     }
   }, [selectedChat, user, supabase, publishTypingUsers, upsertTypingUser, removeTypingUser, clearTypingState])
 
-  const fetchPoll = useCallback(async (chatId: string, userId: string) => {
-    try {
-      setPollError("")
-      setPollLoading(true)
-      const res = await fetch(getApiUrl(`/api/location-chat/poll?chatId=${chatId}&userId=${userId}`))
-      if (!res.ok) return
-      const data = await res.json()
-      if (data.votes) setPollVotes(data.votes)
-      setPollUserVote(data.user_vote || null)
-    } catch (err) {
-      console.warn('[Poll] Fetch failed', err)
-    } finally {
-      setPollLoading(false)
-    }
-  }, [])
-
-  const submitPollVote = useCallback(async (option: "connect" | "chill" | "group") => {
-    if (!selectedChat || !user || !isInProximityChat) return
-    setPollLoading(true)
-    setPollError("")
- 
-    try {
-      const res = await fetch(getApiUrl("/api/location-chat/poll"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: selectedChat.id, user_id: user.id, option }),
-      })
- 
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setPollError(data.error || "Unable to vote right now.")
-        return
-      }
- 
-      if (data.votes) setPollVotes(data.votes)
-      setPollUserVote(data.option || option)
-    } catch (err) {
-      setPollError("Unable to vote right now.")
-    } finally {
-      setPollLoading(false)
-    }
-  }, [selectedChat, user, isInProximityChat])
-
-  useEffect(() => {
-    if (!selectedChat || !user || !isInProximityChat) {
-      setPollVotes({ connect: 0, chill: 0, group: 0 })
-      setPollUserVote(null)
-      return
-    }
- 
-    fetchPoll(selectedChat.id, user.id)
-  }, [selectedChat, user, isInProximityChat, fetchPoll])
-
   const fetchReactionsForMessages = useCallback(async (messageIds: string[]) => {
     if (messageIds.length === 0) return
 
@@ -1982,47 +1925,7 @@ export default function AppPage() {
                   {imageError}
                 </div>
               )}
-              {isInProximityChat && (
-                <div className="mb-3 rounded-2xl border border-border/50 bg-secondary/40 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Target className="w-4 h-4 text-cyan-400" />
-                      <span className="text-sm font-semibold">Vibe check</span>
-                    </div>
-                    {pollLoading && <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />}
-                  </div>
-                  {pollError && <p className="text-xs text-amber-300 mt-2">{pollError}</p>}
-                  <div className="grid grid-cols-3 gap-2 mt-3">
-                    {(
-                      [
-                        { key: "connect", label: "Connect" },
-                        { key: "chill", label: "Chill" },
-                        { key: "group", label: "Group" },
-                      ] as const
-                    ).map((option) => {
-                      const isActive = pollUserVote === option.key
-                      const count = pollVotes[option.key]
-                      return (
-                        <button
-                          key={option.key}
-                          onClick={() => submitPollVote(option.key)}
-                          disabled={pollLoading}
-                          className={`rounded-xl border px-3 py-2 text-xs text-left transition-all ${
-                            isActive
-                              ? 'border-cyan-400 bg-cyan-500/15 text-white'
-                              : 'border-border/60 bg-background/40 hover:border-border'
-                          } ${pollLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-semibold">{option.label}</span>
-                            <span className="text-[11px] text-muted-foreground">{count} votes</span>
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
+
               {isInProximityChat && typingUsers.length > 0 && (
                 <div className="mb-2 text-xs text-muted-foreground flex items-center gap-2">
                   <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
