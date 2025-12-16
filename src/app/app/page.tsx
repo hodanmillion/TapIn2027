@@ -876,10 +876,16 @@ export default function AppPage() {
         )
       })
     } catch (err: any) {
-      logLocation("getPosition:error", { code: err?.code, message: err?.message })
+      logLocation("getPosition:error", {
+        code: err?.code,
+        message: err?.message,
+        navigatorOnline: typeof navigator !== "undefined" ? navigator.onLine : "n/a",
+        netStatus: networkStatus.status,
+        connectionType: networkStatus.connectionType,
+      })
       throw err
     }
-  }, [isNative, logLocation, platform])
+  }, [isNative, logLocation, platform, networkStatus.status, networkStatus.connectionType])
 
   const requestLocationPermission = async () => {
     setLocationError("")
@@ -969,14 +975,20 @@ export default function AppPage() {
     }
   }
 
-  useEffect(() => {
-    const initOnce = async () => {
-      logLocation("init:start", {
-        hostname: typeof window !== "undefined" ? window.location.hostname : "SSR",
-        href: typeof window !== "undefined" ? window.location.href : "SSR",
-        NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
-      })
-      const { data: { user: authUser } } = await supabase.auth.getUser()
+    useEffect(() => {
+      const initOnce = async () => {
+        logLocation("init:start", {
+          hostname: typeof window !== "undefined" ? window.location.hostname : "SSR",
+          href: typeof window !== "undefined" ? window.location.href : "SSR",
+          NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+          navigatorOnline: typeof navigator !== "undefined" ? navigator.onLine : "n/a",
+          netStatus: networkStatus.status,
+          connectionType: networkStatus.connectionType,
+          isOnlineFlag: (networkStatus as any).isOnline ?? networkStatus.status,
+          platform,
+        })
+        const { data: { user: authUser } } = await supabase.auth.getUser()
+
       if (!authUser) {
         router.push("/login")
         return

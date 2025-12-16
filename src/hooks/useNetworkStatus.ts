@@ -18,17 +18,36 @@ export function useNetworkStatus() {
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
   const isNative = Capacitor.getPlatform() !== "web"
 
+  const logNet = (message: string, data?: unknown) => {
+    console.log(
+      `[NetworkDebug][${isNative ? "native" : "web"}] ${message}`,
+      data ?? ""
+    )
+  }
+
   useEffect(() => {
     const checkBackendHealth = async () => {
+      logNet("health:start", {
+        navigatorOnline: typeof navigator !== "undefined" ? navigator.onLine : "n/a",
+        connectionType,
+        status,
+      })
+
       if (isNative) {
-        const netStatus = await Network.getStatus()
-        if (!netStatus.connected) {
-          setStatus("offline")
-          return
+        try {
+          const netStatus = await Network.getStatus()
+          logNet("health:nativeStatus", netStatus)
+          if (!netStatus.connected) {
+            setStatus("offline")
+            return
+          }
+          setConnectionType(netStatus.connectionType)
+        } catch (err: any) {
+          logNet("health:nativeStatus:error", { message: err?.message })
         }
-        setConnectionType(netStatus.connectionType)
       } else {
         if (!navigator.onLine) {
+          logNet("health:webOffline")
           setStatus("offline")
           return
         }
@@ -39,7 +58,9 @@ export function useNetworkStatus() {
         timeoutRef.current = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT)
 
         const startTime = Date.now()
-        const response = await fetch(getApiUrl("/api/health"), {
+        const url = getApiUrl("/api/health")
+        logNet("health:fetch", { url })
+        const response = await fetch(url, {
           method: "GET",
           signal: controller.signal,
           cache: "no-store",
@@ -50,6 +71,8 @@ export function useNetworkStatus() {
           clearTimeout(timeoutRef.current)
           timeoutRef.current = null
         }
+
+        logNet("health:response", { status: response.status, ok: response.ok, latency })
 
         if (response.ok) {
           if (latency > LATENCY_THRESHOLD_MS) {
@@ -67,8 +90,10 @@ export function useNetworkStatus() {
         }
 
         if (error.name === "AbortError") {
+          logNet("health:abort")
           setStatus("degraded")
         } else {
+          logNet("health:error", { name: error?.name, message: error?.message })
           setStatus("offline")
         }
       }
@@ -77,6 +102,7 @@ export function useNetworkStatus() {
     const handleNetworkChange = async () => {
       if (isNative) {
         const netStatus = await Network.getStatus()
+        logNet("listener:nativeStatus", netStatus)
         if (netStatus.connected) {
           setConnectionType(netStatus.connectionType)
           checkBackendHealth()
@@ -87,15 +113,18 @@ export function useNetworkStatus() {
     }
 
     const handleOnline = () => {
+      logNet("listener:webOnline")
       checkBackendHealth()
     }
 
     const handleOffline = () => {
+      logNet("listener:webOffline")
       setStatus("offline")
     }
 
     if (isNative) {
       Network.addListener("networkStatusChange", handleNetworkChange)
+      logNet("listener:registeredNative")
     }
 
     window.addEventListener("online", handleOnline)
@@ -108,6 +137,7 @@ export function useNetworkStatus() {
     return () => {
       if (isNative) {
         Network.removeAllListeners()
+        logNet("listener:removedNative")
       }
       
       window.removeEventListener("online", handleOnline)
@@ -121,7 +151,9 @@ export function useNetworkStatus() {
         clearTimeout(timeoutRef.current)
       }
     }
-  }, [isNative])
+  }, [isNative, connectionType, status])
 
-  return { status, connectionType }
+  const isOnline = status !== "offline"
+
+  return { status, connectionType, isOnline }
 }
