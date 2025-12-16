@@ -1859,7 +1859,7 @@ export default function AppPage() {
 
           <div 
             ref={messagesContainerRef}
-            className="overflow-y-auto px-4 py-4 overscroll-contain"
+            className="overflow-y-auto px-4 py-4 pb-40 overscroll-contain"
           >
             <div className="space-y-4 pb-4 max-w-4xl mx-auto">
               {messages.length === 0 && (
@@ -1969,8 +1969,8 @@ export default function AppPage() {
             </div>
           </div>
 
-          <div className="p-4 glass border-t border-border/50 flex-shrink-0">
-            <div className="max-w-4xl mx-auto">
+          <div className="fixed bottom-0 left-0 right-0 glass border-t border-border/50 z-50 safe-bottom safe-horizontal">
+            <div className="max-w-4xl mx-auto px-4 py-3">
               {!isInProximityChat && (
                 <div className="mb-3 flex items-center justify-center gap-2 text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl py-3 px-4">
                   <Info className="w-5 h-5" />
