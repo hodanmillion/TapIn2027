@@ -57,8 +57,8 @@ import type { TenorImage } from "gif-picker-react"
 const HeatMap = dynamic(() => import("@/components/HeatMap").then((m) => m.HeatMap), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-full flex items-center justify-center bg-secondary/20">
-      <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+      <div className="w-full h-full flex items-center justify-center bg-secondary/20">
+      <Loader2 className="w-8 h-8 text-primary animate-spin" />
     </div>
   ),
 })
@@ -1648,8 +1648,8 @@ export default function AppPage() {
         <div className="max-w-4xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-cyan-500/30 to-blue-500/30 flex items-center justify-center backdrop-blur-sm border border-cyan-400/20">
-                <MapPin className="w-6 h-6 text-cyan-400" />
+              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary/30 to-primary/20 flex items-center justify-center backdrop-blur-sm border border-primary/20">
+                <MapPin className="w-6 h-6 text-primary" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="h-5 w-32 bg-secondary/60 rounded-full animate-pulse mb-1" />
@@ -1686,8 +1686,8 @@ export default function AppPage() {
       <nav className="fixed bottom-0 left-0 right-0 glass border-t border-t-border/50 z-50 safe-bottom safe-horizontal">
         <div className="max-w-4xl mx-auto px-4 py-2 flex items-center justify-around">
           <div className="flex flex-col items-center gap-1 py-2 px-6">
-            <MapPin className="w-6 h-6 text-cyan-400" />
-            <span className="text-xs text-cyan-400 font-medium">Nearby</span>
+            <MapPin className="w-6 h-6 text-primary" />
+            <span className="text-xs text-primary font-semibold">Nearby</span>
           </div>
           <Link href="/app/people" className="flex flex-col items-center gap-1 py-2 px-6">
             <Users className="w-6 h-6 text-muted-foreground" />
@@ -1725,8 +1725,8 @@ export default function AppPage() {
   if (locationPermission === "prompt" || locationPermission === "denied") {
     return (
       <div className="min-h-[100dvh] safe-inset flex flex-col items-center justify-center gap-6 px-6 text-center">
-        <div className="w-24 h-24 rounded-full bg-cyan-500/20 flex items-center justify-center">
-          <Navigation className="w-12 h-12 text-cyan-400" />
+        <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center">
+          <Navigation className="w-12 h-12 text-primary" />
         </div>
         <div className="space-y-2 max-w-sm">
           <h1 className="text-2xl font-bold">Enable Location</h1>
@@ -1749,7 +1749,7 @@ export default function AppPage() {
         <div className="flex flex-col gap-3 w-full max-w-xs">
           <Button
             onClick={requestLocationPermission}
-            className="w-full h-12 rounded-xl bg-cyan-500 hover:bg-cyan-600 font-semibold"
+            className="w-full h-12 rounded-xl bg-primary hover:bg-primary/90 font-semibold"
           >
             <MapPin className="w-5 h-5 mr-2" />
             Allow Location Access
@@ -1786,8 +1786,8 @@ export default function AppPage() {
                 <ArrowLeft className="w-5 h-5" />
               </button>
               <div className="flex-1 min-w-0 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/30 to-blue-500/30 flex items-center justify-center flex-shrink-0 backdrop-blur-sm border border-cyan-400/20 relative">
-                  <Radio className="w-5 h-5 text-cyan-400" />
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/30 to-primary/20 flex items-center justify-center flex-shrink-0 backdrop-blur-sm border border-primary/20 relative">
+                  <Radio className="w-5 h-5 text-primary" />
                   {isInProximityChat && <span className="absolute -top-1 -right-1 w-3 h-3 bg-green-400 rounded-full animate-pulse" />}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -1836,7 +1836,7 @@ export default function AppPage() {
                     <div className={`flex gap-3 ${isOwn ? "flex-row-reverse" : ""}`}>
                       <Avatar className="w-9 h-9 flex-shrink-0">
                         <AvatarImage src={msg.user?.avatar_url || ""} />
-                        <AvatarFallback className="bg-cyan-500/20 text-cyan-400 text-sm">
+                        <AvatarFallback className="bg-primary/20 text-primary text-sm">
                           {msg.user?.username?.[0]?.toUpperCase() || "?"}
                         </AvatarFallback>
                       </Avatar>
@@ -1849,7 +1849,7 @@ export default function AppPage() {
                             {formatMessageTime(msg.created_at)}
                           </span>
                           {isPending && (
-                            <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
+                            <Loader2 className="w-3 h-3 animate-spin text-primary" />
                           )}
                           {isFailed && (
                             <AlertCircle className="w-3 h-3 text-rose-400" />
@@ -1928,7 +1928,7 @@ export default function AppPage() {
 
               {isInProximityChat && typingUsers.length > 0 && (
                 <div className="mb-2 text-xs text-muted-foreground flex items-center gap-2">
-                  <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
+                  <Loader2 className="w-3 h-3 animate-spin text-primary" />
                   <span>
                     {typingUsers.map((t) => t.name).join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
                   </span>
@@ -2037,7 +2037,7 @@ export default function AppPage() {
                 <Button
                   onClick={sendMessage}
                   disabled={!newMessage.trim() || sending || uploadingImage || !isInProximityChat}
-                  className="rounded-xl bg-cyan-500 hover:bg-cyan-600 h-11 w-11"
+                  className="rounded-xl bg-primary hover:bg-primary/90 h-11 w-11"
                 >
                   {sending ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
@@ -2061,8 +2061,8 @@ export default function AppPage() {
           <div className="max-w-4xl mx-auto px-4 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3 flex-shrink-0">
-                <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-cyan-500/30 to-blue-500/30 flex items-center justify-center backdrop-blur-sm border border-cyan-400/20 flex-shrink-0">
-                  <MapPin className="w-6 h-6 text-cyan-400" />
+                <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary/30 to-primary/20 flex items-center justify-center backdrop-blur-sm border border-primary/20 flex-shrink-0">
+                  <MapPin className="w-6 h-6 text-primary" />
                 </div>
                 <div className="flex flex-col min-w-0">
                   <h1 className="font-bold text-lg truncate">
@@ -2086,9 +2086,9 @@ export default function AppPage() {
                   disabled={isLocating}
                 >
                   {isLocating ? (
-                    <Loader2 className="w-5 h-5 animate-spin text-cyan-400" />
+                    <Loader2 className="w-5 h-5 animate-spin text-primary" />
                   ) : (
-                    <Target className="w-5 h-5 text-cyan-400" />
+                    <Target className="w-5 h-5 text-primary" />
                   )}
                 </Button>
                 <Link href="/app/settings" className="flex-shrink-0">
@@ -2108,7 +2108,7 @@ export default function AppPage() {
                 onClick={() => setActiveTab("map")}
                 className={`flex-1 flex items-center justify-center gap-2 py-4 font-medium transition-all ${
                   activeTab === "map"
-                    ? "text-cyan-400 border-b-2 border-cyan-400"
+                    ? "text-primary border-b-2 border-primary"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -2119,7 +2119,7 @@ export default function AppPage() {
                 onClick={() => setActiveTab("chat")}
                 className={`flex-1 flex items-center justify-center gap-2 py-4 font-medium transition-all ${
                   activeTab === "chat"
-                    ? "text-cyan-400 border-b-2 border-cyan-400"
+                    ? "text-primary border-b-2 border-primary"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -2130,7 +2130,7 @@ export default function AppPage() {
                 onClick={() => setActiveTab("photos")}
                 className={`flex-1 flex items-center justify-center gap-2 py-4 font-medium transition-all ${
                   activeTab === "photos"
-                    ? "text-cyan-400 border-b-2 border-cyan-400"
+                    ? "text-primary border-b-2 border-primary"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -2145,7 +2145,7 @@ export default function AppPage() {
                   {(searchedLocation || location) && (
                     <Suspense fallback={
                       <div className="w-full h-full flex items-center justify-center">
-                        <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+                        <Loader2 className="w-8 h-8 text-primary animate-spin" />
                       </div>
                     }>
                       <HeatMap
@@ -2176,11 +2176,11 @@ export default function AppPage() {
                 {proximityChat && (
                   <button
                     onClick={() => setSelectedChat(proximityChat)}
-                    className="w-full glass rounded-2xl p-6 border-2 border-cyan-500/50 bg-cyan-500/10 hover:bg-cyan-500/15 transition-all text-left"
+                    className="w-full glass rounded-2xl p-6 border-2 border-primary/50 bg-primary/10 hover:bg-primary/15 transition-all text-left"
                   >
                     <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 rounded-xl bg-cyan-500/30 flex items-center justify-center relative flex-shrink-0">
-                        <Radio className="w-7 h-7 text-cyan-400" />
+                      <div className="w-14 h-14 rounded-xl bg-primary/30 flex items-center justify-center relative flex-shrink-0">
+                        <Radio className="w-7 h-7 text-primary" />
                         <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-green-400 rounded-full animate-pulse" />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -2248,7 +2248,7 @@ export default function AppPage() {
                   </div>
                   <Button
                     onClick={handleAddPhotoClick}
-                    className="bg-cyan-500 hover:bg-cyan-600 rounded-xl"
+                    className="bg-primary hover:bg-primary/90 rounded-xl"
                     size="sm"
                   >
                     <Image className="w-4 h-4 mr-2" />
@@ -2294,7 +2294,7 @@ export default function AppPage() {
                         <div className="p-2 border-t border-border/50 flex items-center gap-2">
                           <Avatar className="w-6 h-6">
                             <AvatarImage src={photo.user?.avatar_url} />
-                            <AvatarFallback className="bg-cyan-500/20 text-cyan-400 text-xs">
+                            <AvatarFallback className="bg-primary/20 text-primary text-xs">
                               {photo.user?.username?.[0]?.toUpperCase() || "?"}
                             </AvatarFallback>
                           </Avatar>
@@ -2360,7 +2360,7 @@ export default function AppPage() {
                 </div>
 
                 {selectedPhotoLocation ? (
-                  <div className="mb-3 text-xs text-cyan-400 bg-cyan-500/10 rounded-lg px-3 py-2 flex items-center justify-between">
+                  <div className="mb-3 text-xs text-primary bg-primary/10 rounded-lg px-3 py-2 flex items-center justify-between">
                     <span>📍 {selectedPhotoLocation.lat.toFixed(4)}, {selectedPhotoLocation.lng.toFixed(4)}</span>
                     <Button
                       variant="ghost"
@@ -2423,7 +2423,7 @@ export default function AppPage() {
                   {!capturedPhotoDataUrl ? (
                     <>
                       {!selectedPhotoLocation && (
-                        <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-xl p-3 text-xs text-cyan-200 mb-3">
+                        <div className="bg-primary/10 border border-primary/30 rounded-xl p-3 text-xs text-primary/80 mb-3">
                           ℹ️ Select a location on the map first, then choose your photo
                         </div>
                       )}
@@ -2433,7 +2433,7 @@ export default function AppPage() {
                             await takeCameraPhoto()
                           }}
                           disabled={uploadingLocationPhoto || !selectedPhotoLocation}
-                          className="bg-cyan-500 hover:bg-cyan-600 rounded-xl h-12 flex flex-col gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="bg-primary hover:bg-primary/90 rounded-xl h-12 flex flex-col gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <Sparkles className="w-5 h-5" />
                           <span className="text-xs">Take Photo</span>
@@ -2466,7 +2466,7 @@ export default function AppPage() {
                       <Button
                         onClick={() => handleLocationPhotoUpload()}
                         disabled={uploadingLocationPhoto || !selectedPhotoLocation}
-                        className="bg-cyan-500 hover:bg-cyan-600 rounded-xl h-12"
+                        className="bg-primary hover:bg-primary/90 rounded-xl h-12"
                       >
                         {uploadingLocationPhoto ? (
                           <Loader2 className="w-5 h-5 animate-spin" />
@@ -2505,7 +2505,7 @@ export default function AppPage() {
                     <div className="flex items-center gap-3">
                       <Avatar className="w-10 h-10">
                         <AvatarImage src={selectedPhotoView.user?.avatar_url} />
-                        <AvatarFallback className="bg-cyan-500/20 text-cyan-400">
+                        <AvatarFallback className="bg-primary/20 text-primary">
                           {selectedPhotoView.user?.username?.[0]?.toUpperCase() || "?"}
                         </AvatarFallback>
                       </Avatar>
@@ -2527,8 +2527,8 @@ export default function AppPage() {
           <nav className="fixed bottom-0 left-0 right-0 glass border-t border-t-border/50 z-50 safe-bottom safe-horizontal">
             <div className="max-w-4xl mx-auto px-4 py-2 flex items-center justify-around">
               <div className="flex flex-col items-center gap-1 py-2 px-6">
-                <MapPin className="w-6 h-6 text-cyan-400" />
-                <span className="text-xs text-cyan-400 font-medium">Nearby</span>
+                <MapPin className="w-6 h-6 text-primary" />
+                <span className="text-xs text-primary font-semibold">Nearby</span>
               </div>
               <Link href="/app/people" className="flex flex-col items-center gap-1 py-2 px-6">
                 <Users className="w-6 h-6 text-muted-foreground" />
