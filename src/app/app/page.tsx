@@ -101,6 +101,9 @@ const LOCATION_UPDATE_INTERVAL = 10000
 const NEARBY_CACHE_TTL = 2
 const NEARBY_PEOPLE_LIMIT = 200
 const AUTO_JOIN_DELAY = 2000
+const TYPING_TTL_MS = 8000
+const TYPING_RENEWAL_MS = 4000
+const TYPING_CLEAR_DELAY_MS = 5000
 
 function debounce<T extends (...args: any[]) => any>(func: T, wait: number): (...args: Parameters<T>) => void {
   let timeout: NodeJS.Timeout | null = null
@@ -155,6 +158,11 @@ export default function AppPage() {
   const [searchedLocation, setSearchedLocation] = useState<{ lat: number; lng: number; name: string; city: string } | null>(null)
   const [isSearching, setIsSearching] = useState(false)
   const [isLocating, setIsLocating] = useState(false)
+  const [typingUsers, setTypingUsers] = useState<{ id: string; name: string }[]>([])
+  const [pollVotes, setPollVotes] = useState<{ connect: number; chill: number; group: number }>({ connect: 0, chill: 0, group: 0 })
+  const [pollUserVote, setPollUserVote] = useState<"connect" | "chill" | "group" | null>(null)
+  const [pollLoading, setPollLoading] = useState(false)
+  const [pollError, setPollError] = useState("")
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -171,6 +179,11 @@ export default function AppPage() {
   const lastKnownLocationRef = useRef<{ lat: number; lng: number } | null>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const locationPhotoInputRef = useRef<HTMLInputElement>(null)
+  const typingUsersRef = useRef<Map<string, { name: string; updatedAt: number }>>(new Map())
+  const typingProfileCacheRef = useRef<Map<string, string>>(new Map())
+  const typingCleanupRef = useRef<NodeJS.Timeout | null>(null)
+  const typingActiveRef = useRef(false)
+  const typingLastSentRef = useRef(0)
   
   const networkStatus = useNetworkStatus()
   const { messages, sendMessage: sendMessageViaHook, retryMessage } = useMessages(
@@ -1329,6 +1342,214 @@ export default function AppPage() {
     return distance <= PROXIMITY_RADIUS_METERS
   }, [selectedChat?.id, proximityChat?.id, location, proximityChat?.latitude, proximityChat?.longitude])
 
+  const publishTypingUsers = useCallback(() => {
+    const now = Date.now()
+    const entries = Array.from(typingUsersRef.current.entries()).filter(([, value]) => now - value.updatedAt < TYPING_TTL_MS)
+    typingUsersRef.current = new Map(entries)
+    setTypingUsers(entries.map(([id, value]) => ({ id, name: value.name })))
+  }, [])
+
+  const getTypingDisplayName = useCallback(async (userId: string) => {
+    const cached = typingProfileCacheRef.current.get(userId)
+    if (cached) return cached
+
+    try {
+      const { data } = await supabase
+        .from("profiles")
+        .select("display_name, username")
+        .eq("id", userId)
+        .single()
+      const name = data?.display_name || data?.username || "Someone"
+      typingProfileCacheRef.current.set(userId, name)
+      return name
+    } catch (err) {
+      console.warn('[Typing] Profile fetch failed', err)
+      return "Someone"
+    }
+  }, [supabase])
+
+  const upsertTypingUser = useCallback(async (userId: string, updatedAt: string) => {
+    if (!userId || userId === user?.id) return
+    const name = await getTypingDisplayName(userId)
+    const timestamp = new Date(updatedAt).getTime()
+    typingUsersRef.current.set(userId, { name, updatedAt: timestamp })
+    publishTypingUsers()
+  }, [getTypingDisplayName, publishTypingUsers, user?.id])
+
+  const removeTypingUser = useCallback((userId: string) => {
+    typingUsersRef.current.delete(userId)
+    publishTypingUsers()
+  }, [publishTypingUsers])
+
+  const clearTypingState = useCallback(() => {
+    typingActiveRef.current = false
+    typingLastSentRef.current = 0
+    if (typingCleanupRef.current) {
+      clearTimeout(typingCleanupRef.current)
+      typingCleanupRef.current = null
+    }
+  }, [])
+
+  const sendTypingPing = useCallback(() => {
+    if (!selectedChat || !user || !isInProximityChat) return
+
+    const now = Date.now()
+    if (!typingActiveRef.current || now - typingLastSentRef.current > TYPING_RENEWAL_MS) {
+      typingActiveRef.current = true
+      typingLastSentRef.current = now
+
+      fetch(getApiUrl("/api/location-chat/typing"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: selectedChat.id, user_id: user.id }),
+      }).catch(() => {})
+    }
+
+    if (typingCleanupRef.current) {
+      clearTimeout(typingCleanupRef.current)
+    }
+
+    typingCleanupRef.current = setTimeout(() => {
+      clearTypingState()
+      fetch(getApiUrl(`/api/location-chat/typing?chatId=${selectedChat.id}&userId=${user.id}`), {
+        method: "DELETE",
+      }).catch(() => {})
+    }, TYPING_CLEAR_DELAY_MS)
+  }, [selectedChat?.id, user?.id, isInProximityChat, clearTypingState])
+
+  useEffect(() => {
+    if (!selectedChat || !user) {
+      typingUsersRef.current.clear()
+      setTypingUsers([])
+      return
+    }
+
+    let isMounted = true
+    const chatId = selectedChat.id
+
+    const loadInitialTyping = async () => {
+      try {
+        const { data } = await supabase
+          .from("location_typing_indicators")
+          .select("user_id, updated_at")
+          .eq("chat_id", chatId)
+
+        if (data && isMounted) {
+          await Promise.all(data.map((row) => upsertTypingUser(row.user_id, row.updated_at)))
+        }
+      } catch (err) {
+        console.warn('[Typing] Initial fetch failed', err)
+      }
+    }
+
+    loadInitialTyping()
+
+    const pruneInterval = setInterval(publishTypingUsers, 2000)
+
+    const channel = supabase
+      .channel(`location-typing-${chatId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "location_typing_indicators",
+          filter: `chat_id=eq.${chatId}`,
+        },
+        (payload) => {
+          upsertTypingUser(payload.new.user_id as string, payload.new.updated_at as string)
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "location_typing_indicators",
+          filter: `chat_id=eq.${chatId}`,
+        },
+        (payload) => {
+          upsertTypingUser(payload.new.user_id as string, payload.new.updated_at as string)
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "location_typing_indicators",
+          filter: `chat_id=eq.${chatId}`,
+        },
+        (payload) => {
+          removeTypingUser(payload.old.user_id as string)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      isMounted = false
+      supabase.removeChannel(channel)
+      clearInterval(pruneInterval)
+      typingUsersRef.current.clear()
+      setTypingUsers([])
+      clearTypingState()
+      fetch(getApiUrl(`/api/location-chat/typing?chatId=${chatId}&userId=${user.id}`), { method: "DELETE" }).catch(() => {})
+    }
+  }, [selectedChat, user, supabase, publishTypingUsers, upsertTypingUser, removeTypingUser, clearTypingState])
+
+  const fetchPoll = useCallback(async (chatId: string, userId: string) => {
+    try {
+      setPollError("")
+      setPollLoading(true)
+      const res = await fetch(getApiUrl(`/api/location-chat/poll?chatId=${chatId}&userId=${userId}`))
+      if (!res.ok) return
+      const data = await res.json()
+      if (data.votes) setPollVotes(data.votes)
+      setPollUserVote(data.user_vote || null)
+    } catch (err) {
+      console.warn('[Poll] Fetch failed', err)
+    } finally {
+      setPollLoading(false)
+    }
+  }, [])
+
+  const submitPollVote = useCallback(async (option: "connect" | "chill" | "group") => {
+    if (!selectedChat || !user || !isInProximityChat) return
+    setPollLoading(true)
+    setPollError("")
+
+    try {
+      const res = await fetch(getApiUrl("/api/location-chat/poll"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: selectedChat.id, user_id: user.id, option }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setPollError(data.error || "Unable to vote right now.")
+        return
+      }
+
+      if (data.votes) setPollVotes(data.votes)
+      setPollUserVote(data.option || option)
+    } catch (err) {
+      setPollError("Unable to vote right now.")
+    } finally {
+      setPollLoading(false)
+    }
+  }, [selectedChat, user, isInProximityChat])
+
+  useEffect(() => {
+    if (!selectedChat || !user || !isInProximityChat) {
+      setPollVotes({ connect: 0, chill: 0, group: 0 })
+      setPollUserVote(null)
+      return
+    }
+
+    fetchPoll(selectedChat.id, user.id)
+  }, [selectedChat, user, isInProximityChat, fetchPoll])
+
   const handleSignOut = async () => {
     await supabase.auth.signOut()
     router.push("/login")
@@ -1615,6 +1836,55 @@ export default function AppPage() {
                     {imageError}
                   </div>
                 )}
+                {isInProximityChat && (
+                  <div className="mb-3 rounded-2xl border border-border/50 bg-secondary/40 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Target className="w-4 h-4 text-cyan-400" />
+                        <span className="text-sm font-semibold">Vibe check</span>
+                      </div>
+                      {pollLoading && <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />}
+                    </div>
+                    {pollError && <p className="text-xs text-amber-300 mt-2">{pollError}</p>}
+                    <div className="grid grid-cols-3 gap-2 mt-3">
+                      {(
+                        [
+                          { key: "connect", label: "Connect" },
+                          { key: "chill", label: "Chill" },
+                          { key: "group", label: "Group" },
+                        ] as const
+                      ).map((option) => {
+                        const isActive = pollUserVote === option.key
+                        const count = pollVotes[option.key]
+                        return (
+                          <button
+                            key={option.key}
+                            onClick={() => submitPollVote(option.key)}
+                            disabled={pollLoading}
+                            className={`rounded-xl border px-3 py-2 text-xs text-left transition-all ${
+                              isActive
+                                ? 'border-cyan-400 bg-cyan-500/15 text-white'
+                                : 'border-border/60 bg-background/40 hover:border-border'
+                            } ${pollLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold">{option.label}</span>
+                              <span className="text-[11px] text-muted-foreground">{count} votes</span>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+                {typingUsers.length > 0 && (
+                  <div className="mb-2 text-xs text-muted-foreground flex items-center gap-2">
+                    <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
+                    <span>
+                      {typingUsers.map((t) => t.name).join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+                    </span>
+                  </div>
+                )}
                 {showEmojiPicker && (
                   <div className="absolute bottom-20 left-4 right-4 z-50">
                     <div className="relative max-w-sm mx-auto">
@@ -1703,7 +1973,10 @@ export default function AppPage() {
                   <Input
                     placeholder="Type a message..."
                     value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
+                    onChange={(e) => {
+                      setNewMessage(e.target.value)
+                      sendTypingPing()
+                    }}
                     onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
                     className="flex-1 bg-secondary/50 border-border/50 rounded-xl h-11"
                     disabled={sending || uploadingImage}
