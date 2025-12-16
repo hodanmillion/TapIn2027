@@ -7,6 +7,7 @@ import L from "leaflet"
 import "leaflet/dist/leaflet.css"
 import "leaflet.heat"
 import { Search, X, Loader2, MapPin } from "lucide-react"
+import { encodeGeohash, obfuscateCoordinates, getProximityLabel } from "@/lib/location-privacy"
 
 declare module "leaflet" {
   function heatLayer(
@@ -63,6 +64,7 @@ type HeatMapProps = {
   onPhotoClick?: (lat: number, lng: number) => void
   onMapClick?: (lat: number, lng: number) => void
   photos?: LocationPhoto[]
+  enableCoordinateObfuscation?: boolean
 }
 
 type SearchResult = {
@@ -208,8 +210,6 @@ function ActivityPanel({ lat, lng, locationName, onClose }: { lat: number; lng: 
             photoCount: 0,
           })
         }
-      } catch (error) {
-        console.error('[ActivityPanel] Failed to fetch:', error)
       } finally {
         setLoading(false)
       }
@@ -217,12 +217,15 @@ function ActivityPanel({ lat, lng, locationName, onClose }: { lat: number; lng: 
     fetchActivity()
   }, [lat, lng])
 
+  const geohash = encodeGeohash(lat, lng, 6)
+  const zoneLabel = `Zone ${geohash.slice(0, 4).toUpperCase()}`
+
   return (
     <div className="absolute top-16 right-3 z-[1000] w-72 bg-black/95 border border-cyan-500/40 rounded-xl shadow-2xl overflow-hidden">
       <div className="p-3 border-b border-cyan-500/30 flex items-center justify-between">
         <div>
           <h3 className="text-white font-bold text-sm truncate">{locationName}</h3>
-          <p className="text-xs text-gray-400">{lat.toFixed(4)}, {lng.toFixed(4)}</p>
+          <p className="text-xs text-gray-400">{zoneLabel}</p>
         </div>
         <button onClick={onClose} className="text-gray-400 hover:text-white">
           <X className="w-5 h-5" />
@@ -494,26 +497,37 @@ function MapClickHandler({ onClick }: { onClick?: (lat: number, lng: number) => 
   return null
 }
 
-export function HeatMap({ people, center, currentUserLocation, onPersonClick, areaStats, onAreaClick, onPhotoClick, onMapClick, photos = [] }: HeatMapProps) {
+export function HeatMap({ people, center, currentUserLocation, onPersonClick, areaStats, onAreaClick, onPhotoClick, onMapClick, photos = [], enableCoordinateObfuscation = true }: HeatMapProps) {
   const [centerLat, centerLng] = center
   const [showActivityPanel, setShowActivityPanel] = useState(false)
   const [activityLocation, setActivityLocation] = useState<{ lat: number; lng: number; name: string } | null>(null)
   const memoCenter = useMemo(() => [centerLat, centerLng] as [number, number], [centerLat, centerLng])
   
+  // Obfuscate people coordinates for map display
+  const displayPeople = useMemo(() => {
+    if (!enableCoordinateObfuscation) return people
+    
+    return people.map(person => ({
+      ...person,
+      latitude: obfuscateCoordinates(person.latitude, person.longitude).lat,
+      longitude: obfuscateCoordinates(person.latitude, person.longitude).lng,
+    }))
+  }, [people, enableCoordinateObfuscation])
+
   const heatPoints: [number, number, number][] = []
   const zoomLevel = areaStats && Object.keys(areaStats).length > 1 ? 4 : 13
   const totalUsers = areaStats
     ? Object.values(areaStats).reduce((sum, s) => sum + s.userCount, 0)
-    : people.length
+    : displayPeople.length
   const onlineCount = areaStats
     ? Object.values(areaStats).reduce((sum, s) => sum + s.onlineCount, 0)
-    : people.filter((p) => p.is_online).length
+    : displayPeople.filter((p) => p.is_online).length
   const vibePercent = totalUsers === 0 ? 0 : Math.round((onlineCount / totalUsers) * 100)
   const boundsPoints = useMemo(() => {
-    const pts: [number, number][] = people.map((p) => [p.latitude, p.longitude])
+    const pts: [number, number][] = displayPeople.map((p) => [p.latitude, p.longitude])
     if (currentUserLocation) pts.push(currentUserLocation)
     return pts
-  }, [people, currentUserLocation])
+  }, [displayPeople, currentUserLocation])
 
   if (areaStats) {
     Object.values(areaStats).forEach((stat) => {
@@ -526,7 +540,7 @@ export function HeatMap({ people, center, currentUserLocation, onPersonClick, ar
       }
     })
   } else {
-    people.forEach((p) => {
+    displayPeople.forEach((p) => {
       heatPoints.push([p.latitude, p.longitude, p.is_online ? 1.0 : 0.45])
     })
   }
@@ -569,7 +583,7 @@ export function HeatMap({ people, center, currentUserLocation, onPersonClick, ar
         className="w-full h-full rounded-2xl overflow-hidden border border-white/5 shadow-[0_20px_80px_rgba(14,165,233,0.15)]"
         style={{ minHeight: "400px" }}
       >
-        <ViewportInfo people={people} areaStats={areaStats} />
+        <ViewportInfo people={displayPeople} areaStats={areaStats} />
         <TileLayer
           url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png"
         />
@@ -588,39 +602,45 @@ export function HeatMap({ people, center, currentUserLocation, onPersonClick, ar
           </Marker>
         )}
 
-        {photos.map((photo) => (
-          <Marker
-            key={photo.id}
-            position={[photo.latitude, photo.longitude]}
-            icon={photoIcon}
-            eventHandlers={{
-              click: () => onPhotoClick?.(photo.latitude, photo.longitude),
-            }}
-          >
-            <Popup>
-              <div className="text-center p-2 min-w-[180px]">
-                <div className="relative w-full h-32 mb-2">
-                  <Image 
-                    src={photo.photo_url} 
-                    alt={photo.caption || "Location photo"} 
-                    fill
-                    className="object-cover rounded-lg"
-                  />
+        {photos.map((photo) => {
+          const displayCoords = enableCoordinateObfuscation 
+            ? obfuscateCoordinates(photo.latitude, photo.longitude)
+            : { lat: photo.latitude, lng: photo.longitude }
+          
+          return (
+            <Marker
+              key={photo.id}
+              position={[displayCoords.lat, displayCoords.lng]}
+              icon={photoIcon}
+              eventHandlers={{
+                click: () => onPhotoClick?.(photo.latitude, photo.longitude),
+              }}
+            >
+              <Popup>
+                <div className="text-center p-2 min-w-[180px]" style={{ userSelect: 'none' }}>
+                  <div className="relative w-full h-32 mb-2">
+                    <Image 
+                      src={photo.photo_url} 
+                      alt={photo.caption || "Location photo"} 
+                      fill
+                      className="object-cover rounded-lg"
+                    />
+                  </div>
+                  {photo.caption && (
+                    <p className="text-sm mb-2">{photo.caption}</p>
+                  )}
+                  <p className="text-xs text-gray-500">by {photo.user.display_name || photo.user.username}</p>
+                  <button
+                    className="mt-2 w-full px-3 py-1.5 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600"
+                    onClick={() => onPhotoClick?.(photo.latitude, photo.longitude)}
+                  >
+                    📷 View All Photos Here
+                  </button>
                 </div>
-                {photo.caption && (
-                  <p className="text-sm mb-2">{photo.caption}</p>
-                )}
-                <p className="text-xs text-gray-500">by {photo.user.display_name || photo.user.username}</p>
-                <button
-                  className="mt-2 w-full px-3 py-1.5 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600"
-                  onClick={() => onPhotoClick?.(photo.latitude, photo.longitude)}
-                >
-                  📷 View All Photos Here
-                </button>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
+              </Popup>
+            </Marker>
+          )
+        })}
 
         {areaStats && Object.entries(areaStats).map(([cityName, stats]) => (
           <Marker
@@ -660,7 +680,7 @@ export function HeatMap({ people, center, currentUserLocation, onPersonClick, ar
           </Marker>
         ))}
 
-        {!areaStats && people.map((person) => (
+        {!areaStats && displayPeople.map((person) => (
           <Marker
             key={person.id}
             position={[person.latitude, person.longitude]}
@@ -670,7 +690,7 @@ export function HeatMap({ people, center, currentUserLocation, onPersonClick, ar
             }}
           >
             <Popup>
-              <div className="text-center p-2">
+              <div className="text-center p-2" style={{ userSelect: 'none' }}>
                 <strong className="text-base">{person.display_name || person.username}</strong>
                 <br />
                 <span className="text-sm mt-1 inline-block">
@@ -680,7 +700,7 @@ export function HeatMap({ people, center, currentUserLocation, onPersonClick, ar
                   className="mt-3 w-full px-3 py-1.5 bg-cyan-500 text-white rounded-lg text-sm font-medium hover:bg-cyan-600"
                   onClick={() => onPhotoClick?.(person.latitude, person.longitude)}
                 >
-                  📷 View Photos Here
+                  📷 View Photos Nearby
                 </button>
               </div>
             </Popup>

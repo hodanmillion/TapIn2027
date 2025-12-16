@@ -1,10 +1,10 @@
 "use client"
 
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
-import { WifiOff, Wifi, CloudOff } from "lucide-react"
+import { WifiOff, CloudOff } from "lucide-react"
 
 export function OfflineBanner() {
-  const networkStatus = useNetworkStatus()
+  const { status: networkStatus, connectionType } = useNetworkStatus()
 
   if (networkStatus === "online") return null
 
@@ -25,7 +25,7 @@ export function OfflineBanner() {
         ) : (
           <>
             <CloudOff className="w-4 h-4 flex-shrink-0 animate-pulse" />
-            <span>Slow connection • Showing cached data</span>
+            <span>Slow connection{connectionType !== "unknown" ? ` (${connectionType})` : ""} • Showing cached data</span>
           </>
         )}
       </div>

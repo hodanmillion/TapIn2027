@@ -7,13 +7,20 @@ import { useNetworkStatus } from "./useNetworkStatus"
 import { createClient } from "@/lib/supabase/client"
 import type { LocationMessageWithUser } from "@/lib/types"
 
+const POLLING_INTERVAL_ONLINE = 5000
+const POLLING_INTERVAL_DEGRADED = 10000
+const MAX_MESSAGES_CACHE = 200
+
 export function useMessages(threadId: string | null, userId: string | null) {
   const [messages, setMessages] = useState<(CachedMessage & { user?: any })[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const networkStatus = useNetworkStatus()
+  const { status: networkStatus } = useNetworkStatus()
   const supabase = useRef(createClient()).current
   const lastFetchEpochRef = useRef<number>(0)
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const realtimeChannelRef = useRef<any>(null)
+  const [realtimeMode, setRealtimeMode] = useState<"websocket" | "polling">("websocket")
 
   const loadFromCache = useCallback(async () => {
     if (!threadId) return
@@ -25,17 +32,17 @@ export function useMessages(threadId: string | null, userId: string | null) {
         .sortBy("created_at")
 
       if (cached.length > 0) {
-        setMessages(cached)
+        setMessages(cached.slice(-MAX_MESSAGES_CACHE))
       }
     } catch (err) {
       console.error("[useMessages] Cache load error:", err)
     }
   }, [threadId])
 
-  const syncFromServer = useCallback(async () => {
+  const syncFromServer = useCallback(async (silent = false) => {
     if (!threadId || !userId || networkStatus === "offline") return
 
-    setLoading(true)
+    if (!silent) setLoading(true)
     setError(null)
 
     try {
@@ -68,12 +75,6 @@ export function useMessages(threadId: string | null, userId: string | null) {
 
       lastFetchEpochRef.current = currentEpoch
 
-      const existingPending = await db.messages
-        .where("thread_id")
-        .equals(threadId)
-        .and((msg) => msg.status === "pending" || msg.status === "failed")
-        .toArray()
-
       await db.messages
         .where("thread_id")
         .equals(threadId)
@@ -100,14 +101,14 @@ export function useMessages(threadId: string | null, userId: string | null) {
         .equals(threadId)
         .sortBy("created_at")
 
-      setMessages(allMessages)
+      setMessages(allMessages.slice(-MAX_MESSAGES_CACHE))
     } catch (err: any) {
       console.error("[useMessages] Sync error:", err)
       if (err.name !== "AbortError") {
         setError("Unable to fetch latest messages")
       }
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [threadId, userId, networkStatus])
 
@@ -125,53 +126,121 @@ export function useMessages(threadId: string | null, userId: string | null) {
 
     syncFromServer()
 
-    const channel = supabase
-      .channel(`messages-${threadId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "location_messages",
-          filter: `chat_id=eq.${threadId}`,
-        },
-        async (payload) => {
-          const newMsg = payload.new as any
+    const startPolling = () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+      }
 
-          const existing = await db.messages.get(newMsg.id)
-          if (existing) return
+      const interval = networkStatus === "degraded" 
+        ? POLLING_INTERVAL_DEGRADED 
+        : POLLING_INTERVAL_ONLINE
 
-          const { data: userData } = await supabase
-            .from("profiles")
-            .select("*")
-            .eq("id", newMsg.user_id)
-            .single()
+      pollingIntervalRef.current = setInterval(() => {
+        syncFromServer(true)
+      }, interval)
+    }
 
-          const cachedMessage: CachedMessage = {
-            id: newMsg.id,
-            thread_id: threadId,
-            user_id: newMsg.user_id,
-            content: newMsg.content,
-            message_type: newMsg.message_type || "text",
-            created_at: newMsg.created_at,
-            status: "sent",
-            user: userData || undefined,
+    const startRealtime = () => {
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current)
+      }
+
+      const channel = supabase
+        .channel(`messages-${threadId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "location_messages",
+            filter: `chat_id=eq.${threadId}`,
+          },
+          async (payload) => {
+            const newMsg = payload.new as any
+
+            const existing = await db.messages.get(newMsg.id)
+            if (existing) return
+
+            const { data: userData } = await supabase
+              .from("profiles")
+              .select("*")
+              .eq("id", newMsg.user_id)
+              .single()
+
+            const cachedMessage: CachedMessage = {
+              id: newMsg.id,
+              thread_id: threadId,
+              user_id: newMsg.user_id,
+              content: newMsg.content,
+              message_type: newMsg.message_type || "text",
+              created_at: newMsg.created_at,
+              status: "sent",
+              user: userData || undefined,
+            }
+
+            await db.messages.put(cachedMessage)
+
+            setMessages((prev) => {
+              if (prev.find((m) => m.id === newMsg.id)) return prev
+              const updated = [...prev, cachedMessage]
+              return updated.slice(-MAX_MESSAGES_CACHE)
+            })
           }
+        )
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            setRealtimeMode("websocket")
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current)
+              pollingIntervalRef.current = null
+            }
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.warn("[Realtime] Connection failed, falling back to polling")
+            setRealtimeMode("polling")
+            startPolling()
+          }
+        })
 
-          await db.messages.put(cachedMessage)
+      realtimeChannelRef.current = channel
 
-          setMessages((prev) => {
-            if (prev.find((m) => m.id === newMsg.id)) return prev
-            return [...prev, cachedMessage]
-          })
+      setTimeout(() => {
+        if (realtimeChannelRef.current?.state !== "joined") {
+          console.warn("[Realtime] Timeout, falling back to polling")
+          setRealtimeMode("polling")
+          startPolling()
         }
-      )
-      .subscribe()
+      }, 5000)
+    }
+
+    if (networkStatus === "offline") {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current)
+        realtimeChannelRef.current = null
+      }
+    } else if (networkStatus === "degraded") {
+      setRealtimeMode("polling")
+      startPolling()
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current)
+        realtimeChannelRef.current = null
+      }
+    } else {
+      startRealtime()
+    }
 
     return () => {
-      supabase.removeChannel(channel)
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+      }
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current)
+      }
     }
-  }, [threadId, userId, supabase, syncFromServer])
+  }, [threadId, userId, supabase, syncFromServer, networkStatus])
 
   const sendMessage = useCallback(
     async (content: string, messageType: "text" | "image" | "gif" = "text") => {
@@ -182,7 +251,7 @@ export function useMessages(threadId: string | null, userId: string | null) {
 
         const newMessage = await db.messages.get(clientId)
         if (newMessage) {
-          setMessages((prev) => [...prev, newMessage])
+          setMessages((prev) => [...prev, newMessage].slice(-MAX_MESSAGES_CACHE))
         }
       } catch (err) {
         console.error("[useMessages] Send error:", err)
@@ -214,5 +283,6 @@ export function useMessages(threadId: string | null, userId: string | null) {
     sendMessage,
     retryMessage,
     refresh: syncFromServer,
+    realtimeMode,
   }
 }

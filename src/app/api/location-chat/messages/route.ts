@@ -205,27 +205,31 @@ export async function POST(request: Request) {
     ]
 
     if (senderData?.city && chatData && content.length <= 50) {
-      supabaseAdmin
-        .from("profiles")
-        .select("id")
-        .eq("city", senderData.city)
-        .neq("id", user_id)
-        .limit(50)
-        .then(({ data: nearbyUsers }) => {
-          if (nearbyUsers && nearbyUsers.length > 0) {
-            const notifications = nearbyUsers.map(u => ({
-              user_id: u.id,
-              chat_type: "location",
-              chat_id: chat_id,
-              chat_name: chatData.location_name,
-              message_preview: content.length > 50 ? content.substring(0, 50) + "..." : content,
-              sender_name: senderData.display_name || senderData.username || "Anonymous",
-              sender_avatar: senderData.avatar_url,
-            }))
-            return supabaseAdmin.from("chat_notifications").insert(notifications)
-          }
-        })
-        .catch(() => {})
+      updatePromises.push(
+        (async () => {
+          try {
+            const { data: nearbyUsers } = await supabaseAdmin
+              .from("profiles")
+              .select("id")
+              .eq("city", senderData.city)
+              .neq("id", user_id)
+              .limit(50)
+            
+            if (nearbyUsers && nearbyUsers.length > 0) {
+              const notifications = nearbyUsers.map(u => ({
+                user_id: u.id,
+                chat_type: "location",
+                chat_id: chat_id,
+                chat_name: chatData.location_name,
+                message_preview: content.length > 50 ? content.substring(0, 50) + "..." : content,
+                sender_name: senderData.display_name || senderData.username || "Anonymous",
+                sender_avatar: senderData.avatar_url,
+              }))
+              await supabaseAdmin.from("chat_notifications").insert(notifications)
+            }
+          } catch {}
+        })()
+      )
     }
 
     await Promise.allSettled(updatePromises)
