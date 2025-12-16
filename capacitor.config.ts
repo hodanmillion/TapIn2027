@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'TapIn',
   webDir: 'out',
   server: {
-    url: 'https://orchids-connect-app.vercel.app',
+    url: 'https://orchids-connect-app.vercel.app/app',
     cleartext: true
   }
 };
