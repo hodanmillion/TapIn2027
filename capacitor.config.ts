@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'TapIn',
   webDir: 'out',
   server: {
-    url: 'https://tap-in2026-jj45.vercel.app/?v=20251215-1947',
+    url: 'https://orchids-connect-ce8m4wqsj-hodans-projects-65e91166.vercel.app',
     cleartext: true
   }
 };
