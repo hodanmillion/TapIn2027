@@ -64,11 +64,6 @@ export type LocationMessage = {
   user_id: string
   content: string
   created_at: string
-  message_type?: "text" | "image" | "gif"
-  reply_to_id?: string | null
-  edited_at?: string | null
-  is_deleted?: boolean
-  client_id?: string
 }
 
 export type LocationMessageWithUser = LocationMessage & {

@@ -97,9 +97,9 @@ type ChatVisit = {
 const PROXIMITY_RADIUS_METERS = 50
 const MIN_MOVEMENT_METERS = 50
 const DEBOUNCE_DELAY = 300
-const LOCATION_UPDATE_INTERVAL = 30000
-const NEARBY_CACHE_TTL = 5
-const NEARBY_PEOPLE_LIMIT = 100
+const LOCATION_UPDATE_INTERVAL = 10000
+const NEARBY_CACHE_TTL = 2
+const NEARBY_PEOPLE_LIMIT = 200
 const AUTO_JOIN_DELAY = 2000
 
 function debounce<T extends (...args: any[]) => any>(func: T, wait: number): (...args: Parameters<T>) => void {
@@ -315,7 +315,7 @@ export default function AppPage() {
       }
     } catch (err: any) {
       if (err.name !== 'AbortError' && !cached) {
-        console.log('[Nearby] Fetch failed, using cached data')
+        setNetworkError("Could not refresh nearby people. Check connection.")
       }
     } finally {
       fetchNearbyInProgressRef.current = false
@@ -363,6 +363,8 @@ export default function AppPage() {
   }, [])
 
   const sendPresenceHeartbeat = useCallback(async (userId: string) => {
+    if (!networkStatus.isOnline) return
+    
     try {
       await fetch(getApiUrl("/api/presence"), {
         method: "POST",
@@ -370,9 +372,9 @@ export default function AppPage() {
         body: JSON.stringify({ userId }),
       })
     } catch (err) {
-      console.error('Presence heartbeat failed:', err)
+      console.log('[Presence] Heartbeat skipped (offline)')
     }
-  }, [])
+  }, [networkStatus.isOnline])
 
   useEffect(() => {
     if (!user?.id) return
@@ -619,7 +621,7 @@ export default function AppPage() {
       return { name: lastKnownAddress, city: fallbackCity }
     }
     
-    const fallbackName = "Nearby"
+    const fallbackName = `Location ${Math.abs(lat.toFixed(2))},${Math.abs(lng.toFixed(2))}`
     setLastKnownAddress(fallbackName)
     
     return { 
@@ -645,7 +647,7 @@ export default function AppPage() {
     if (lat >= -37.9 && lat <= -37.7 && lng >= 144.9 && lng <= 145.1) return "Melbourne"
     if (lat >= 35.5 && lat <= 35.8 && lng >= 139.6 && lng <= 139.9) return "Tokyo"
     if (lat >= 1.2 && lat <= 1.4 && lng >= 103.7 && lng <= 104) return "Singapore"
-    return "Nearby"
+    return `Location ${Math.abs(lat.toFixed(1))},${Math.abs(lng.toFixed(1))}`
   }
 
   const applyPosition = useCallback(async (coords: GeolocationCoordinates, userId?: string) => {
@@ -683,20 +685,19 @@ export default function AppPage() {
         }
       }
 
-      if (hasMoved) {
-        const results = await Promise.allSettled([
-          updateUserLocation(id, coords.latitude, coords.longitude, city),
-          autoJoinProximityChat(coords.latitude, coords.longitude, name, id),
-          fetchNearbyPeople(city, id),
-        ])
-        
-        results.forEach((result, index) => {
-          if (result.status === 'rejected') {
-            const labels = ['location update', 'proximity chat', 'nearby people']
-            console.error(`${labels[index]} failed:`, result.reason)
-          }
-        })
-      }
+      const tasks = [
+        hasMoved ? updateUserLocation(id, coords.latitude, coords.longitude, city) : Promise.resolve(),
+        autoJoinProximityChat(coords.latitude, coords.longitude, name, id),
+        fetchNearbyPeople(city, id),
+      ]
+
+      const results = await Promise.allSettled(tasks)
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          const labels = ['location update', 'proximity chat', 'nearby people']
+          console.error(`${labels[index]} failed:`, result.reason)
+        }
+      })
     }
   }, [autoJoinProximityChat, fetchNearbyPeople, updateUserLocation, user, proximityChat])
 
@@ -948,7 +949,39 @@ export default function AppPage() {
     if (!selectedChat || !user) return
 
     fetchMessages(selectedChat.id, user.id)
-  }, [selectedChat, user, fetchMessages])
+
+    const channel = supabase
+      .channel(`location-chat-${selectedChat.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "location_messages",
+          filter: `chat_id=eq.${selectedChat.id}`,
+        },
+        async (payload) => {
+          const { data: userData } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", payload.new.user_id)
+            .single()
+
+          if (userData) {
+            const newMsg = { ...payload.new, user: userData } as LocationMessageWithUser
+            const existingMessage = messages.find((m) => m.id === newMsg.id)
+            if (!existingMessage) {
+              scrollToBottom()
+            }
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [selectedChat, supabase, fetchMessages, user, messages])
 
   useEffect(() => {
     if (proximityChat?.id) {
@@ -967,6 +1000,11 @@ export default function AppPage() {
 
     try {
       await sendMessageViaHook(messageContent, "text")
+      
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(`tapin:messages:${selectedChat.id}`)
+      }
+      
       scrollToBottom()
     } catch (error) {
       console.error("Failed to send message:", error)
@@ -990,6 +1028,7 @@ export default function AppPage() {
       const res = await fetch(getApiUrl(`/api/geocode?address=${encodeURIComponent(searchAddress.trim())}`))
       
       if (!res.ok) {
+        setNetworkError("Could not find that location. Try again.")
         return
       }
 
@@ -998,21 +1037,30 @@ export default function AppPage() {
       if (data.lat && data.lng) {
         const city = await reverseGeocode(data.lat, data.lng).then(r => r.city).catch(() => "Unknown City")
         
-        setSearchedLocation({
+        const searchedLoc = {
           lat: data.lat,
           lng: data.lng,
           name: data.name || searchAddress,
           city: city
-        })
+        }
+        
+        setSearchedLocation(searchedLoc)
+        cacheLocation(searchedLoc)
 
         if (user?.id) {
-          fetchNearbyPeople(city, user.id)
-          autoJoinProximityChat(data.lat, data.lng, data.name || searchAddress, user.id)
-          fetchLocationPhotos(undefined, data.lat, data.lng)
+          Promise.all([
+            fetchNearbyPeople(city, user.id),
+            autoJoinProximityChat(data.lat, data.lng, data.name || searchAddress, user.id),
+            fetchLocationPhotos(undefined, data.lat, data.lng),
+            updateUserLocation(user.id, data.lat, data.lng, city)
+          ]).catch(err => console.error('[Search] Update error:', err))
         }
+      } else {
+        setNetworkError("Location not found. Try another search.")
       }
     } catch (error) {
       console.error("[Search] Error:", error)
+      setNetworkError("Search failed. Check your connection.")
     } finally {
       setIsSearching(false)
     }
@@ -1023,6 +1071,7 @@ export default function AppPage() {
     setSearchedLocation(null)
     
     if (location && user?.id) {
+      cacheLocation(location)
       fetchNearbyPeople(location.city, user.id)
       autoJoinProximityChat(location.lat, location.lng, location.name, user.id)
       fetchLocationPhotos(undefined, location.lat, location.lng)
@@ -1042,6 +1091,10 @@ export default function AppPage() {
 
     try {
       await sendMessageViaHook(gif.url, "gif")
+      
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(`tapin:messages:${selectedChat.id}`)
+      }
     } catch (error) {
       console.error('[GIF] Error:', error)
     } finally {
@@ -1095,6 +1148,10 @@ export default function AppPage() {
       const { url } = await uploadRes.json()
 
       await sendMessageViaHook(url, "image")
+      
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(`tapin:messages:${selectedChat.id}`)
+      }
     } catch (error: any) {
       setImageError(error.message || "Could not upload image")
     } finally {
@@ -1450,12 +1507,15 @@ export default function AppPage() {
                 <ArrowLeft className="w-5 h-5" />
               </button>
               <div className="flex-1 min-w-0 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/30 to-blue-500/30 flex items-center justify-center flex-shrink-0 backdrop-blur-sm border border-cyan-400/20">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/30 to-blue-500/30 flex items-center justify-center flex-shrink-0 backdrop-blur-sm border border-cyan-400/20 relative">
                   <Radio className="w-5 h-5 text-cyan-400" />
+                  {isInProximityChat && <span className="absolute -top-1 -right-1 w-3 h-3 bg-green-400 rounded-full animate-pulse" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <h1 className="font-bold truncate text-lg">{selectedChat.location_name}</h1>
-                  <p className="text-xs text-muted-foreground">Live chat</p>
+                  <p className="text-xs text-muted-foreground">
+                    {isInProximityChat ? 'You are here' : 'View only'}
+                  </p>
                 </div>
               </div>
             </div>
