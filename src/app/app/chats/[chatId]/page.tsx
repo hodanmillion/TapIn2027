@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ArrowLeft, Send, Loader2, Smile, Image, X, Heart, Sparkles, MoreVertical, Edit, Trash, Copy, Reply, Check, CheckCheck, WifiOff } from "lucide-react"
 import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react"
 import GifPicker, { TenorImage } from "gif-picker-react"
+import { getApiUrl } from "@/lib/api"
 
 type Reaction = {
   emoji: string
@@ -408,7 +409,7 @@ export default function ChatPage() {
   const fetchReactions = useCallback(async (messageIds: string[]) => {
     try {
       if (messageIds.length === 0) return {}
-      const res = await fetch(`/api/chat/reactions?messageIds=${messageIds.join(",")}`)
+      const res = await fetch(getApiUrl(`/api/chat/reactions?messageIds=${messageIds.join(",")}`))
       if (!res.ok) return {}
       const data = await res.json()
       return data.reactions || {}
@@ -420,7 +421,7 @@ export default function ChatPage() {
   const fetchReadReceipts = useCallback(async (messageIds: string[]) => {
     try {
       if (messageIds.length === 0) return {}
-      const res = await fetch(`/api/chat/read-receipts?messageIds=${messageIds.join(",")}`)
+      const res = await fetch(getApiUrl(`/api/chat/read-receipts?messageIds=${messageIds.join(",")}`))
       if (!res.ok) return {}
       const data = await res.json()
       return data.receipts || {}
@@ -442,7 +443,7 @@ export default function ChatPage() {
     if (!isOnline) return
 
     try {
-      const res = await fetch(`/api/chat/messages?chatId=${chatId}`)
+      const res = await fetch(getApiUrl(`/api/chat/messages?chatId=${chatId}`))
       if (!res.ok) {
         setLoading(false)
         return
@@ -510,7 +511,7 @@ export default function ChatPage() {
       }
       setUser(user)
 
-      const res = await fetch(`/api/chat?userId=${user.id}`)
+      const res = await fetch(getApiUrl(`/api/chat?userId=${user.id}`))
       const data = await res.json()
       const chat = data.chats?.find((c: ChatInfo) => c.id === chatId)
       if (chat) {
@@ -625,9 +626,10 @@ export default function ChatPage() {
 
     typingTimeoutRef.current = setTimeout(async () => {
       setIsTyping(false)
-      await fetch(`/api/chat/typing?chatId=${chatId}&userId=${user.id}`, {
-        method: "DELETE",
+      await fetch(getApiUrl(`/api/chat/typing?chatId=${chatId}&userId=${user.id}`), {
+        method: "POST",
       })
+
     }, 2000)
   }, [user, chatId, isTyping])
 
@@ -848,9 +850,14 @@ export default function ChatPage() {
   const handleDeleteMessage = async (messageId: string) => {
     if (!user) return
 
-    await fetch(`/api/chat/messages?messageId=${messageId}&userId=${user.id}`, {
-      method: "DELETE",
+    await fetch(getApiUrl(`/api/chat/messages?messageId=${messageId}&userId=${user.id}`), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ content: editText }),
     })
+
 
     setMessages((prev) =>
       prev.map((m) =>

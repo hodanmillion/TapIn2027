@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { db, CachedFriend, setSyncTimestamp, getSyncTimestamp } from "@/lib/db"
 import { useNetworkStatus } from "./useNetworkStatus"
+import { getApiUrl } from "@/lib/api"
 
 export function useFriends(userId: string | null) {
   const [friends, setFriends] = useState<CachedFriend[]>([])
@@ -34,10 +35,11 @@ export function useFriends(userId: string | null) {
 
     setLoading(true)
 
-    try {
-      const response = await fetch(`/api/people-nearby?userId=${userId}&scope=friends`, {
-        signal: AbortSignal.timeout(8000),
-      })
+      try {
+        const response = await fetch(getApiUrl(`/api/people-nearby?userId=${userId}&scope=friends`), {
+          signal: AbortSignal.timeout(8000),
+        })
+
 
       if (!response.ok) return
 

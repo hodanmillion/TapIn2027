@@ -8,6 +8,7 @@ import "leaflet/dist/leaflet.css"
 import "leaflet.heat"
 import { Search, X, Loader2, MapPin } from "lucide-react"
 import { encodeGeohash, obfuscateCoordinates, getProximityLabel } from "@/lib/location-privacy"
+import { getApiUrl } from "@/lib/api"
 
 declare module "leaflet" {
   function heatLayer(
@@ -195,12 +196,13 @@ function ActivityPanel({ lat, lng, locationName, onClose }: { lat: number; lng: 
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const fetchActivity = async () => {
-      setLoading(true)
-      try {
-        const res = await fetch(`/api/people-nearby?latitude=${lat}&longitude=${lng}&radius=1000&limit=50`)
-        if (res.ok) {
-          const data = await res.json()
+      const fetchActivity = async () => {
+        setLoading(true)
+        try {
+          const res = await fetch(getApiUrl(`/api/people-nearby?latitude=${lat}&longitude=${lng}&radius=1000&limit=50`))
+          if (res.ok) {
+            const data = await res.json()
+
           const users = data.people || []
           setActivity({
             userCount: users.length,

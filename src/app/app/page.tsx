@@ -645,28 +645,29 @@ export default function AppPage() {
      const controller = new AbortController()
      fetchAbortControllersRef.current.set(fetchKey, controller)
 
-     try {
-       const res = await fetch(`/api/location-chat/messages?chatId=${chatId}&userId=${userId}`, {
-         signal: controller.signal,
-       })
-       
-       if (!res.ok) {
-         const errorData = await res.json().catch(() => ({ error: 'Unknown error' }))
-         if (errorData.error !== 'outside_radius') {
-           console.error('[FetchMessages] API error:', res.status, errorData)
-         }
-         return
-       }
-       
-       const data = await res.json()
-       if (data.messages) {
-         cacheSet(cacheKey, data.messages, 1)
-       }
-     } catch (err: any) {
-       if (err.name !== 'AbortError') {
-         console.error('[FetchMessages] Fetch error:', err)
-       }
-     } finally {
+    try {
+      const res = await fetch(getApiUrl(`/api/location-chat/messages?chatId=${chatId}&userId=${userId}`), {
+        signal: controller.signal,
+      })
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: 'Unknown error' }))
+        if (errorData.error !== 'outside_radius') {
+          console.error('[FetchMessages] API error:', res.status, errorData)
+        }
+        return
+      }
+      
+      const data = await res.json()
+      if (data.messages) {
+        cacheSet(cacheKey, data.messages, 1)
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.error('[FetchMessages] Fetch error:', err)
+      }
+    } finally {
+
        fetchAbortControllersRef.current.delete(fetchKey)
      }
    }, [cacheGet, cacheSet])

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { db, CachedThread, setSyncTimestamp, getSyncTimestamp } from "@/lib/db"
 import { useNetworkStatus } from "./useNetworkStatus"
+import { getApiUrl } from "@/lib/api"
 
 export function useThreads(userId: string | null) {
   const [threads, setThreads] = useState<CachedThread[]>([])
@@ -39,14 +40,15 @@ export function useThreads(userId: string | null) {
     setLoading(true)
 
     try {
-      const [privateChatsRes, historyRes] = await Promise.allSettled([
-        fetch(`/api/chat?userId=${userId}`, {
-          signal: AbortSignal.timeout(8000),
-        }),
-        fetch(`/api/chat-history?userId=${userId}`, {
-          signal: AbortSignal.timeout(8000),
-        }),
-      ])
+        const [privateChatsRes, historyRes] = await Promise.allSettled([
+          fetch(getApiUrl(`/api/chat?userId=${userId}`), {
+            signal: AbortSignal.timeout(8000),
+          }),
+          fetch(getApiUrl(`/api/chat-history?userId=${userId}`), {
+            signal: AbortSignal.timeout(8000),
+          }),
+        ])
+
 
       const syncTimestamp = await getSyncTimestamp("threads")
       const currentEpoch = (syncTimestamp?.epoch || 0) + 1

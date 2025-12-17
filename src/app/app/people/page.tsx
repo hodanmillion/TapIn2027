@@ -30,6 +30,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { getApiUrl } from "@/lib/api"
 
 type FriendWithProfile = {
   id: string
@@ -118,7 +119,7 @@ function PeopleContent() {
           *,
           sender:profiles!taps_sender_id_fkey(*)
         `).eq("receiver_id", user.id).eq("is_read", false).order("created_at", { ascending: false }).limit(10),
-        fetch(`/api/notifications?userId=${user.id}`).then(async res => {
+        fetch(getApiUrl(`/api/notifications?userId=${user.id}`)).then(async res => {
           if (!res.ok) return []
           const data = await res.json()
           return data.notifications || []
