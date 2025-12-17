@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "ios:dev": "npx cap sync ios && npx cap open ios",
-    "ios:prod": "npx cap sync ios && npx cap open ios"
+    "ios:build": "npm run build && npx cap sync ios && npx cap open ios"
   },
   "dependencies": {
     "@capacitor/camera": "^8.0.0",
