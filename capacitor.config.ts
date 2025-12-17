@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'TapIn',
   webDir: '.next',
   server: {
-    url: 'https://tap-in2026-jj45-git-main-hodans-projects-65e91166.vercel.app',
+    url: 'http://localhost:3000',
     cleartext: true
   }
 };
