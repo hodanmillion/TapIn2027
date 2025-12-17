@@ -5,10 +5,10 @@ const config: CapacitorConfig = {
   appName: 'TapIn',
   webDir: '.next',
   server: {
-    url: process.env.NODE_ENV === 'production' 
-      ? 'https://tap-in2026-jj45-git-main-hodans-projects-65e91166.vercel.app'
-      : 'http://localhost:3000',
-    cleartext: true
+    // For TestFlight/production builds, use your Vercel URL
+    // For local development in Simulator, comment out this server block
+    url: 'https://tap-in2026-jj45-git-main-hodans-projects-65e91166.vercel.app',
+    cleartext: false
   }
 };
 
