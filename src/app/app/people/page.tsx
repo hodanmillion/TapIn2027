@@ -78,7 +78,7 @@ function PeopleContent() {
   const [refreshing, setRefreshing] = useState(false)
   const [loading, setLoading] = useState(!initialCache)
   const router = useRouter()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   useEffect(() => {
     const getUser = async () => {
