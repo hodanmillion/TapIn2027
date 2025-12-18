@@ -57,10 +57,20 @@ export function getApiUrl(path: string): string {
   const isNative = Boolean((window as any).Capacitor?.isNativePlatform?.()) || protocol === 'capacitor:' || protocol === 'ionic:'
   const isHttp = protocol === 'http:' || protocol === 'https:'
 
-  let selectedOrigin = API_BASE_URL
-  let selectedLabel: 'ABSOLUTE_API' | 'WEB_ORIGIN' | 'CONFIGURED_API' = 'ABSOLUTE_API'
+  // Detect LAN / localhost hosts for native live-reload builds (iOS/Android dev)
+  const isLanHost = /^(localhost|127\.0\.0\.1|0\.0\.0\.0)$/i.test(host)
+    || /^10\./.test(host)
+    || /^192\.168\./.test(host)
+    || /^172\.(1[6-9]|2[0-9]|3[01])\./.test(host)
 
-  if (isNative || !isHttp || protocol === 'file:') {
+  let selectedOrigin = API_BASE_URL
+  let selectedLabel: 'ABSOLUTE_API' | 'WEB_ORIGIN' | 'CONFIGURED_API' | 'NATIVE_LIVERELOAD' = 'ABSOLUTE_API'
+
+  if (isNative && isHttp && isLanHost) {
+    // Native + live reload served from local/lan host -> use same origin so API calls hit local dev server
+    selectedOrigin = origin
+    selectedLabel = 'NATIVE_LIVERELOAD'
+  } else if (isNative || !isHttp || protocol === 'file:') {
     selectedOrigin = API_BASE_URL
     selectedLabel = 'ABSOLUTE_API'
   } else {
