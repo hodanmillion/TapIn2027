@@ -53,16 +53,10 @@ export function getApiUrl(path: string): string {
   const { protocol, origin, host } = window.location
   const isNative = Boolean((window as any).Capacitor?.isNativePlatform?.()) || protocol === 'capacitor:' || protocol === 'ionic:'
 
-  if (isNative) {
-    const finalUrl = `${API_BASE_URL}${cleanPath}`
-    logBaseResolution('native', { protocol, origin })
-    console.log(`[getApiUrl] platform=native apiOrigin=${API_BASE_URL} url=${finalUrl}`)
-    return finalUrl
-  }
-
-  logBaseResolution('web', { protocol, origin })
-  console.log(`[getApiUrl] platform=web using relative url=${cleanPath}`)
-  return cleanPath
+  const finalUrl = `${API_BASE_URL}${cleanPath}`
+  logBaseResolution(isNative ? 'native' : 'web', { protocol, origin })
+  console.log(`[getApiUrl] platform=${isNative ? 'native' : 'web'} apiOrigin=${API_BASE_URL} url=${finalUrl}`)
+  return finalUrl
 }
 
 export async function apiRequest(path: string, options?: RequestInit): Promise<Response> {
