@@ -20,7 +20,12 @@ export default function Home() {
 
   useEffect(() => {
     const checkAuth = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
+      const { data: { user }, error } = await supabase.auth.getUser()
+
+      if (error?.message?.toLowerCase().includes("refresh token not found")) {
+        await supabase.auth.signOut().catch(() => {})
+      }
+
       if (user) {
         router.push("/app")
       } else {
