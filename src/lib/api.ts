@@ -73,22 +73,11 @@ export function getApiUrl(path: string): string {
   } else if (isNative || !isHttp || protocol === 'file:') {
     selectedOrigin = API_BASE_URL
     selectedLabel = 'ABSOLUTE_API'
-  } else {
-    // Real web (http/https)
-    try {
-      const apiUrl = new URL(API_BASE_URL)
-      if (apiUrl.host !== host) {
-        selectedOrigin = origin
-        selectedLabel = 'WEB_ORIGIN'
-      } else {
-        selectedOrigin = API_BASE_URL
-        selectedLabel = 'CONFIGURED_API'
-      }
-    } catch {
+    } else {
+      // Real web (http/https): always use the current origin for API calls
       selectedOrigin = origin
       selectedLabel = 'WEB_ORIGIN'
     }
-  }
 
   const finalUrl = `${selectedOrigin}${cleanPath}`
   logBaseResolution('client', { protocol, origin, host, isNative, selectedLabel })
