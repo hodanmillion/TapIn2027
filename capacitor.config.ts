@@ -1,6 +1,6 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
-const serverUrl = process.env.CAP_SERVER_URL?.trim() || 'https://tap-in2026-jj45-git-main-hodans-projects-65e91166.vercel.app'
+const serverUrl = process.env.CAP_SERVER_URL?.trim() || 'http://192.168.2.41:3000'
 const useCleartext = serverUrl.startsWith('http://')
 
 const config: CapacitorConfig = {
